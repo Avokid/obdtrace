@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OBDTrace</title>
+<style>
+:root{--bg:#10151c;--card:#19212c;--fg:#e6edf3;--mut:#8b98a8;--ac:#3fb6ff;--ok:#3fb950;--bad:#f85149;--warn:#d29922}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+header{display:flex;gap:12px;align-items:center;padding:10px 18px;background:#0b0f14;border-bottom:1px solid #243040;flex-wrap:wrap}
+header h1{font-size:18px;margin:0;flex:1}
+nav{display:flex;gap:4px;padding:8px 18px;flex-wrap:wrap}
+nav button{background:none;border:0;color:var(--mut);padding:8px 14px;border-radius:6px;cursor:pointer;font-size:15px}
+nav button.on{background:var(--card);color:var(--fg)}
+main{padding:0 18px 40px;max-width:1000px;margin:auto}
+.card{background:var(--card);border-radius:10px;padding:16px;margin:12px 0}
+h2{margin:0 0 8px;font-size:17px}
+button.b{background:var(--ac);color:#04111c;border:0;border-radius:6px;padding:8px 14px;font-size:15px;cursor:pointer;margin:3px 3px 3px 0}
+button.b.sec{background:#2a3748;color:var(--fg)}button.b.red{background:var(--bad);color:#fff}
+button.b:disabled{opacity:.5}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--bad);margin-right:6px}.dot.on{background:var(--ok)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.g{background:#0f151d;border-radius:8px;padding:10px}.g .n{color:var(--mut);font-size:12px}.g .v{font-size:24px;font-weight:600}.g .u{font-size:12px;color:var(--mut)}
+pre{background:#0b0f14;padding:10px;border-radius:6px;overflow:auto;font-size:13px;white-space:pre-wrap}
+.mut{color:var(--mut)}.warn{color:var(--warn)}.bad{color:var(--bad)}.ok{color:var(--ok)}
+code{background:#0b0f14;padding:1px 5px;border-radius:4px}
+input,select{background:#0b0f14;color:var(--fg);border:1px solid #2a3748;border-radius:6px;padding:7px}
+table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:5px 8px;border-bottom:1px solid #243040}
+.hide{display:none}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.step{border-left:3px solid #2a3748;padding-left:12px;margin:10px 0}
+.item{padding:8px;border:1px solid #2a3748;border-radius:8px;margin:6px 0;display:flex;justify-content:space-between;gap:8px;align-items:center}
+dialog{background:var(--card);color:var(--fg);border:1px solid #2a3748;border-radius:10px;max-width:480px}
+dialog::backdrop{background:#000a}
+</style>
+</head>
+<body>
+<header>
+  <h1>🚗 OBDTrace <span class="mut" id="ver"></span></h1>
+  <span><span class="dot" id="dot"></span><span id="conn"></span></span>
+  <select id="lang" aria-label="Language"></select>
+</header>
+<nav id="nav"></nav>
+<main>
+<section id="p-connect"></section>
+<section id="p-live" class="hide"></section>
+<section id="p-dtc" class="hide"></section>
+<section id="p-rec" class="hide"></section>
+<section id="p-history" class="hide"></section>
+<section id="p-ai" class="hide"></section>
+<section id="p-help" class="hide"></section>
+</main>
+<dialog id="dlg"><div id="dlgBody"></div><div class="row" style="margin-top:12px"><button class="b red" id="dlgYes"></button><button class="b sec" id="dlgNo"></button></div></dialog>
+
+<script src="/assets/i18next.js"></script>
+<script>
+if (/^#[0-9a-f]{32}$/.test(location.hash)) {
+  sessionStorage.setItem("obdtrace.session",location.hash.slice(1));
+  history.replaceState(null,"",location.pathname);
+}
+const browserToken=sessionStorage.getItem("obdtrace.session")||"";
+function apiFetch(path,options={}) {
+  return fetch(path,{...options,redirect:"error",headers:{...options.headers,Authorization:`Bearer ${browserToken}`}});
+}
+let L="en",languages=[];
+const t=(key,values)=>i18next.t(key,values);
+const tagged=(type,id)=>id==null?"—":t(`${type}.${id}`,{defaultValue:String(id)});
+const number=(value,options)=>typeof value==="number"?value.toLocaleString(L,options):String(value??"—");
+const date=ms=>ms==null?"—":new Date(ms).toLocaleString(L);
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const errorText=detail=>t("operationError")+": "+(detail?.message??detail);
+function btGuide(){
+  const os=["windows","macos","linux"].includes(OB.os)?OB.os:"linux";
+  return `<ol>${[1,2,3,4].map(i=>`<li>${esc(t(`bt.${os}.${i}`))}</li>`).join("")}</ol>`;
+}
+let ST={},OB={},PR=[],LIVE={},lastCall=null;
+
+async function api(name,args){
+  const r=await apiFetch("/api/tool/"+name,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(args||{})});
+  const j=await r.json(); if(!j.ok) throw new Error(j.error); return j.result;
+}
+async function post(path,b){return (await apiFetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)})).json()}
+
+const TABS=["connect","live","dtc","rec","history","ai","help"];
+function nav(){
+  $("#nav").innerHTML=TABS.map(k=>`<button data-k="${k}" class="${(localStorage.tab||"connect")==k?"on":""}">${t(k)}</button>`).join("");
+  $("#nav").querySelectorAll("button").forEach(b=>b.onclick=()=>show(b.dataset.k));
+}
+function show(k){localStorage.tab=k;TABS.forEach(x=>$("#p-"+x).classList.toggle("hide",x!=k));nav();render(k)}
+
+function head(){
+  const a=ST.adapter||{};
+  $("#dot").className="dot"+(a.connected?" on":"");
+  $("#conn").textContent=a.connected?`${t("conn")}: ${a.adapter||""} ${a.protocol?"· "+a.protocol:""}${a.voltage?" · "+a.voltage:""}`:t("disc");
+  $("#ver").textContent=ST.app_version?"v"+ST.app_version:"";
+  if($("#liveHistory"))$("#liveHistory").innerHTML=sessionBanner();
+}
+
+function render(k){({connect:rConnect,live:rLive,dtc:rDtc,rec:rRec,history:rHistory,ai:rAi,help:rHelp})[k]()}
+
+let adapters=null,scanError="",connectError="",manualTarget="",scanning=false,connecting=false;
+
+function rConnect(){
+  const a=ST.adapter||{};
+  const disabled=scanning||connecting||a.connecting?"disabled":"";
+  const devices=(adapters?.adapters||[]).filter(x=>x.kind!=="mock");
+  $("#p-connect").innerHTML=`
+  <div class="card"><h2>${t("connect")}</h2><p class="mut">${t("adapterNote")}</p>
+   ${a.connected?`<p class="ok">${t("conn")}: ${esc(a.adapter)}</p><button class="b sec" id="bDisc" ${disabled}>${t("disconnect")}</button>`:""}
+   ${connectError||a.error?`<p class="bad">${esc(errorText(connectError||a.error))}</p>`:""}
+   ${connecting||a.connecting?`<p class="mut">${t("connecting")}</p>`:""}
+   <button class="b" id="bScan" ${disabled}>${t("scan")}</button><button class="b sec" id="bDemo" ${disabled}>${t("demo")}</button>
+   <div id="list">
+   ${scanning?`<p class="mut">${t("scanning")}</p>`:devices.map((x,i)=>`<div class="item"><span><b>${esc(x.name)}</b> <span class="mut">${esc(tagged("adapter",x.kind))}${x.recommended?" ★":""}<br>${esc(t(`adapterNote.${x.note_key}`,{defaultValue:x.note}))}</span></span><button class="b" data-device="${i}" ${disabled}>${t("use")}</button></div>`).join("")}
+   ${!scanning && adapters && !devices.length?`<p class="warn">${t("noadapters")}</p>`:""}
+   ${!scanning?(adapters?.warnings||[]).map(w=>`<p class="warn">${esc(errorText(w))}</p>`).join(""):""}
+   ${scanError?`<p class="bad">${esc(errorText(scanError))}</p>`:""}</div>
+   <form id="manualConnect" class="row"><label for="manualTarget">${t("manualTarget")}</label>
+   <input id="manualTarget" placeholder="ble:OBDII / serial:COM3" value="${esc(manualTarget)}" required ${disabled}>
+   <button class="b" ${disabled}>${t("use")}</button></form>
+   <p class="mut">${t("targetHint")}</p></div>
+  <div class="card" id="aiSetup"></div>
+  <div class="card"><h2>${t("tips")} (${esc(OB.os||"")})</h2>${btGuide()}</div>`;
+  rAiSetup();
+  $("#bScan").onclick=scan;$("#bDemo").onclick=()=>doConnect("mock:audi_demo");
+  $("#list").querySelectorAll("[data-device]").forEach(b=>b.onclick=()=>doConnect(devices[+b.dataset.device].target));
+  $("#manualTarget").oninput=e=>{manualTarget=e.target.value};
+  $("#manualConnect").onsubmit=e=>{e.preventDefault();if(manualTarget.trim())doConnect(manualTarget.trim())};
+  if($("#bDisc"))$("#bDisc").onclick=async()=>{
+    connectError="";
+    try{await api("disconnect");await refresh()}catch(e){connectError=e.message}
+    rConnect();
+  };
+}
+async function scan(){
+  scanning=true;scanError="";rConnect();
+  try{adapters=await api("list_adapters",{scan_bluetooth:true})}
+  catch(e){scanError=e.message}
+  finally{scanning=false;rConnect()}
+}
+async function doConnect(target){
+  connecting=true;connectError="";rConnect();
+  try{updateStatus(await api("connect",{target}))}
+  catch(e){connectError=e.message;await refresh().catch(()=>{})}
+  finally{connecting=false;rConnect()}
+}
+
+function rLive(){
+  const a=ST.adapter||{};
+  if(!a.connected){$("#p-live").innerHTML=`<div class="card">${t("nolive")}</div>`;return}
+  $("#p-live").innerHTML=`<div class="card" id="liveHistory">${sessionBanner()}</div><div class="card"><div class="grid" id="gauges"></div></div><div class="card"><p class="mut">${t("safety")}</p></div>`;
+  paintLive();
+}
+function sessionBanner(){
+  const scan=ST.last_dtc_scan,age=scan?Math.max(0,Math.floor((Date.now()-scan.completed_ms)/1000)):null;
+  return `<b>${t("history")} #${esc(ST.session_id??"-")}</b><p class="mut">${t("autoHistory")}</p>
+   ${ST.storage_error?`<p class="bad">${esc(errorText(ST.storage_error))}</p>`:""}
+   ${scan?`<p class="${age>60?"warn":"mut"}">DTC: ${t("lastPoll")} ${number(age)} s / 30 s</p>`:"<p class='warn'>DTC: —</p>"}
+   ${dtcCategories(scan)}`;
+}
+function paintLive(){
+  const g=$("#gauges");if(!g)return;
+  g.innerHTML=Object.entries(LIVE).sort().map(([k,v])=>`<div class="g"><div class="n" title="${esc(k)}">${esc(tagged("pid",k))}</div><div class="v">${esc(number(v.v,{minimumFractionDigits:Math.abs(v.v)>=100?0:1,maximumFractionDigits:Math.abs(v.v)>=100?0:1}))}</div><div class="u">${esc(v.unit||"")}</div></div>`).join("");
+}
+
+function dtcCategories(scan){
+  return ["stored","pending","permanent"].map(key=>{
+    const read=scan?.[key],codes=read?.codes?.join(", ");
+    const result=read?.status==="ok"?(codes||t("noCodes")):tagged("status",read?.status);
+    return `<div>${t(`status.${key}`)}: ${esc(result)}${read?.error?` — ${esc(read.error)}`:""}
+      ${read?` (${t("lastSuccess")}: ${esc(date(read.last_success_ms))})`:""}</div>`;
+  }).join("");
+}
+function readinessView(data){
+  if(!data)return "";
+  return `<p>${t("mil")}: ${t(data.mil_on?"milOn":"milOff")} · ${t("codeCount",{count:data.dtc_count})}</p>
+    <ul>${(data.monitors||[]).map(m=>`<li>${esc(tagged("monitor",m.name))}: ${esc(tagged("status",m.status))}</li>`).join("")}</ul>`;
+}
+function diagnosticView(tool,data){
+  let summary="";
+  if(tool==="read_dtcs"){
+    summary=`<p>${t("dtcCaution")}</p>${dtcCategories(data)}${data.readiness?.value?readinessView(data.readiness.value):
+      `<p>${t("ready")}: ${esc(tagged("status",data.readiness?.status))}</p>`}`;
+  }else if(tool==="read_readiness"){
+    summary=readinessView(data);
+  }else if(tool==="read_freeze_frame"){
+    const rows=Object.entries(data.values||{}).map(([k,v])=>`<tr><th>${esc(tagged("pid",k))}</th>
+      <td>${v.value==null?esc(tagged("status",v.status)):esc(`${number(v.value)} ${v.unit||""}`)}</td></tr>`).join("");
+    summary=`<p>${t("freezeNote")}</p><p>${esc(tagged("status",data.status))}${data.dtc_that_set_freeze_frame?` · ${esc(data.dtc_that_set_freeze_frame)}`:""}</p>${rows?`<table>${rows}</table>`:""}`;
+  }else{
+    summary=`<p>${t("clearComplete")}</p>`;
+  }
+  return `${summary}<details><summary>${t("rawData")}</summary><pre>${esc(JSON.stringify(data,null,2))}</pre></details>`;
+}
+
+function rDtc(){
+  $("#p-dtc").innerHTML=`<div class="card"><h2>${t("dtc")}</h2><p class="mut">${t("safety")}</p>
+   <button class="b" id="bRead">${t("readdtc")}</button><button class="b sec" id="bFF">${t("freeze")}</button><button class="b sec" id="bRd">${t("ready")}</button><button class="b red" id="bClr">${t("cleardtc")}</button>
+   <div id="dtcOut" aria-live="polite"></div></div>`;
+  async function read(tool,args){
+    const out=$("#dtcOut");
+    out.textContent=t("loading");
+    try{out.innerHTML=diagnosticView(tool,await api(tool,args))}catch(e){out.textContent=errorText(e)}
+  }
+  const run=(id,tool)=>$(id).onclick=()=>read(tool);
+  run("#bRead","read_dtcs");run("#bFF","read_freeze_frame");run("#bRd","read_readiness");
+  $("#bClr").onclick=()=>{
+    const session_id=ST.session_id;
+    $("#dlgBody").innerHTML=`<h2>${t("cleardtc")}</h2><p>${t("clearq")}</p>`;$("#dlgYes").textContent=t("yes");$("#dlgNo").textContent=t("no");
+    $("#dlg").showModal();
+    $("#dlgNo").onclick=()=>$("#dlg").close();
+    $("#dlgYes").onclick=()=>{$("#dlg").close();return read("clear_dtcs",{confirm:true,session_id})};
+  };
+}
+
+async function rRec(){
+  const rb=ST.ring_buffer||{},rc=ST.recording;
+  $("#p-rec").innerHTML=`
+  <div class="card"><h2>${t("ring")}</h2>
+   <p class="mut">${number(rb.span_seconds||0)}/${number(rb.window_seconds||300)} s · ${t("sampleCount",{count:rb.samples||0})}</p>
+   <div class="row"><input id="ringS" type="number" min="10" max="3600" value="${rb.window_seconds||300}" style="width:90px"> ${t("ringsec")} <button class="b sec" id="bRing">OK</button></div>
+   <div class="row" style="margin-top:8px"><input id="saveM" type="number" min="1" max="60" value="5" style="width:70px"> min <button class="b" id="bSave">${t("save")}</button></div><pre id="saveOut" class="hide"></pre></div>
+  <div class="card"><h2>${t("rec")}</h2>
+   <p class="mut">${t("autoHistory")}</p>
+   ${rc?`<p class="ok">● ${esc(rc.label)} · ${t("sampleCount",{count:rc.samples||0})} · ${number(rc.seconds)} s</p><button class="b red" id="bStop">${t("stoprec")}</button>`
+       :`<div class="row"><input id="recL" placeholder="${t("label")}"><button class="b" id="bStart">${t("startrec")}</button></div>`}
+   <h2 style="margin-top:14px">${t("recs")}</h2><div id="recList" class="mut">…</div></div>`;
+  $("#bRing").onclick=async()=>{await api("set_ring_buffer",{seconds:+$("#ringS").value})};
+  $("#bSave").onclick=async()=>{try{const r=await api("save_diagnostic_log",{duration_s:+$("#saveM").value*60,label:"ui"});$("#saveOut").classList.remove("hide");$("#saveOut").textContent=t("savedn")+"\n"+JSON.stringify(r,null,2)}catch(e){alert(errorText(e))}};
+  if($("#bStart"))$("#bStart").onclick=async()=>{try{await api("start_recording",{label:$("#recL").value||"ui"})}catch(e){alert(errorText(e))}};
+  if($("#bStop"))$("#bStop").onclick=async()=>{await api("stop_recording")};
+  try{const r=await api("list_recordings");const a=r.recordings||r;
+    $("#recList").innerHTML=Array.isArray(a)&&a.length?`<table>${a.map(x=>`<tr><td>#${x.id}</td><td>${esc(x.label)}</td><td>${esc(x.started||x.start||"")}</td><td>${x.samples??""}</td></tr>`).join("")}</table>`:"—"}catch(e){$("#recList").textContent=errorText(e)}
+}
+
+const AI_CLIENTS={"copilot-cli":"GitHub Copilot CLI",vscode:"VS Code / GitHub Copilot","claude-desktop":"Claude Desktop","claude-code":"Claude Code"};
+let aiClient="";
+const aiAnswers={},aiFeedback={},aiSaving=new Set(),aiSaved=new Set();
+
+function rAiSetup(){
+  $("#aiSetup").innerHTML=`
+    <h2>${t("aiSetup")}</h2><p class="mut">${t("aiIntro")}</p>
+    <div class="row"><label for="aiClient">${t("aiClient")}</label>
+    <select id="aiClient"><option value="">${t("aiChoose")}</option>
+    ${Object.entries(AI_CLIENTS).map(([id,label])=>`<option value="${id}">${label}</option>`).join("")}</select></div>
+    <div class="step" id="aiAnswerRow" hidden><label for="aiAnswer">${t("aiConfigured")}</label>
+    <select id="aiAnswer"><option value="">${t("aiChoose")}</option><option value="new">${t("aiNew")}</option>
+    <option value="existing">${t("aiExisting")}</option></select></div>
+    <div id="aiGuide"></div><div id="aiConnectStatus" aria-live="polite"></div>`;
+  const client=$("#aiClient"),answer=$("#aiAnswer");
+  function showAnswer(){
+    $("#aiAnswerRow").hidden=!aiClient;
+    answer.value=aiAnswers[aiClient]||"";
+    rAiGuide();
+  }
+  client.value=aiClient;
+  client.onchange=()=>{aiClient=client.value;showAnswer()};
+  answer.onchange=()=>{aiAnswers[aiClient]=answer.value;rAiGuide()};
+  showAnswer();
+  paintAiStatus();
+}
+
+function rAiGuide(){
+  const root=$("#aiGuide"),client=aiClient,answer=aiAnswers[client];
+  if(!root)return;
+  root.innerHTML="";
+  if(!answer)return;
+  const cli=client==="copilot-cli",code=client==="claude-code",feedback=aiFeedback[client];
+  const demo=(ST.adapter?.connected||ST.adapter?.connecting)&&(ST.target||"").split(":")[0]==="mock";
+  if(cli&&demo){root.innerHTML=`<p class="warn">${t("copilotDemo")}</p>`;return}
+  const isNew=answer==="new",copied=feedback?.key==="configCopied";
+  const path=OB.config_paths?.[client]||"";
+  const ready={vscode:"vscodeReady","copilot-cli":"copilotReady","claude-desktop":"claudeDesktopReady"}[client];
+  const prompt=t("testPrompt",{server:cli?"obdtrace-auto":"obdtrace"});
+  root.innerHTML=`
+    ${isNew&&(code?`<p>${t("claudeCodeSetup")}</p><pre>${esc(OB.cli?.[client])}</pre>`:
+      `<p class="mut">${esc(path)}</p>${cli?`<p class="mut">${t("copilotHint")}</p>`:""}
+      <button class="b" id="aiWrite" ${aiSaving.has(client)?"disabled":""}>${t(cli?"enableCopilot":"write")}</button>
+      <button class="b sec" id="aiCopy">${t("copyConfig")}</button>`)||""}
+    <p class="${feedback?.error?"bad":"ok"}" aria-live="polite">${isNew?esc(feedback?.error?errorText(feedback.error):feedback?.key?t(feedback.key):""):""}${isNew&&copied?` <code>${esc(path)}</code>`:""}</p>
+    ${!isNew||aiSaved.has(client)||copied||code?`<div class="step">
+      ${ready?`<p>${t(ready)}</p>`:""}<p>${t("testHint")}</p><pre>${esc(prompt)}</pre></div>`:""}`;
+  if($("#aiWrite"))$("#aiWrite").onclick=async()=>{
+    aiSaving.add(client);
+    $("#aiWrite").disabled=true;
+    try{
+      const r=await post("/api/write-config",{client});
+      if(!r.ok)throw new Error(r.error);
+      aiSaved.add(client);
+      aiFeedback[client]={key:"aiSaved"};
+    }catch(e){aiFeedback[client]={error:e.message}}
+    finally{aiSaving.delete(client);if(aiClient===client)rAiGuide()}
+  };
+  if($("#aiCopy"))$("#aiCopy").onclick=async()=>{
+    try{
+      await navigator.clipboard.writeText(JSON.stringify(OB.snippets[client],null,2));
+      aiFeedback[client]={key:"configCopied"};
+    }catch(e){aiFeedback[client]={error:e.message}}
+    if(aiClient===client)rAiGuide();
+  };
+}
+
+function paintAiStatus(){
+  const cl=ST.mcp_clients||[],lt=ST.last_tool_call;
+  const status=`${cl.length?`<p class="ok">${t("aiClients")}: ${cl.map(c=>esc(c.name)+" "+esc(c.version)).join(", ")}</p>`:`<p class="mut">${t("aiNone")}</p>`}
+    ${lt?.origin==="mcp"?`<p class="ok">${t("aiLast")}: <code>${esc(lt.tool)}</code> (${esc(date(lt.at))})</p>`:""}`;
+  for(const id of ["#aiConnectStatus","#aiStatus"]){
+    const root=$(id);
+    if(root&&root.dataset.status!==status){root.innerHTML=status;root.dataset.status=status}
+  }
+}
+
+function rAi(){
+  $("#p-ai").innerHTML=`
+  <div class="card"><h2>${t("test")}</h2><div id="aiStatus"></div>
+   <button class="b sec" id="goAiSetup">${t("aiSetup")}</button></div>
+  <div class="card"><h2>${t("prompts")}</h2><p class="mut">${t("promptsHint")}</p>
+   ${PR.map(p=>`<div class="item"><span>${esc(t(`prompt.${p.id}.title`))}</span><button class="b sec" data-p="${esc(p.id)}">${t("copy")}</button></div>`).join("")}<div id="aiPrompt"></div></div>`;
+  $("#goAiSetup").onclick=()=>{show("connect");$("#aiClient").focus()};
+  paintAiStatus();
+  $("#p-ai").querySelectorAll("[data-p]").forEach(b=>b.onclick=async()=>{try{await showPrompt(b.dataset.p,{session_id:ST.session_id},"#aiPrompt")}catch(e){alert(errorText(e))}});
+}
+
+let HS=null,HV=[],eventCursor=null,sampleCursor=null,sessionCursor=null,selectedEvent=null,selectedAnnotation=null;
+function localDate(ms){return new Date(ms-new Date(ms).getTimezoneOffset()*60000).toISOString().slice(0,23)}
+function historyRange(){return {session_id:HS.id,from_ms:new Date($("#hFrom").value).getTime(),to_ms:new Date($("#hTo").value).getTime()}}
+async function showPrompt(id,context,target){
+  if(context.session_id && !context.vehicle_id){const s=await api("get_session",{session_id:context.session_id});context.vehicle_id=s.vehicle_id;}
+  const result=await post("/api/prompt/"+id,{...context,language:L});
+  if(!result.ok)throw new Error(result.error);
+  const root=$(target);root.innerHTML=`<h2>${t("promptPreview")}</h2><pre></pre><button class="b">${t("copy")}</button><p class="mut"></p>`;
+  root.querySelector("pre").textContent=result.text;
+  root.querySelector("button").onclick=async()=>{try{await navigator.clipboard.writeText(result.text);root.querySelector("p").textContent=t("copiedPrompt")}catch(e){root.querySelector("p").textContent=errorText(e)}};
+}
+async function rHistory(){
+  $("#p-history").innerHTML=`<div class="card"><h2>${t("history")}</h2><p class="mut">${t("autoHistory")}</p>
+   <div class="row"><label>${t("vehicle")} <select id="hVehicle"><option value="">${t("all")}</option></select></label>
+   <label>DTC <input id="hCode" placeholder="P0420" size="8"></label>
+   <select id="hStatus" aria-label="${esc(t("annotations"))}"><option value="">${t("all")}</option>${["proposed","confirmed","rejected"].map(s=>`<option value="${s}">${t(`status.${s}`)}</option>`).join("")}</select>
+   <label>${t("from")} <input id="hSearchFrom" type="datetime-local"></label><label>${t("to")} <input id="hSearchTo" type="datetime-local"></label>
+   <button id="hSearch" class="b">${t("search")}</button></div><div id="hSessions"></div><button id="hNext" class="b sec" disabled>${t("next")}</button></div><div id="hDetail"></div>`;
+  try{
+    HV=await api("list_vehicles");
+    $("#hVehicle").innerHTML+=HV.map(v=>`<option value="${v.id}">#${v.id} ${esc(v.name)} ${esc(v.vin_masked||"")}</option>`).join("");
+    $("#hSearch").onclick=()=>loadSessions();
+    $("#hNext").onclick=()=>loadSessions(sessionCursor);
+    await loadSessions();
+  }catch(e){$("#hSessions").textContent=errorText(e);}
+}
+async function loadSessions(before){
+  try{
+    const args={limit:25};
+    if($("#hVehicle").value)args.vehicle_id=+$("#hVehicle").value;
+    if($("#hCode").value.trim())args.dtc=$("#hCode").value.trim().toUpperCase();
+    if($("#hStatus").value)args.annotation_status=$("#hStatus").value;
+    if($("#hSearchFrom").value)args.from_ms=new Date($("#hSearchFrom").value).getTime();
+    if($("#hSearchTo").value)args.to_ms=new Date($("#hSearchTo").value).getTime();
+    if(before)args.before_id=before;
+    const r=await api("list_sessions",args);sessionCursor=r.next_before_id;
+    $("#hNext").disabled=!sessionCursor;
+    $("#hSessions").innerHTML=r.sessions.length?`<table>${r.sessions.map(s=>`<tr><td>#${s.id}</td><td>${esc(date(s.started_ms))}</td><td>${esc(tagged("status",s.state))}</td><td>${esc(s.dtc_history.map(d=>d.code+" ("+tagged("status",d.category)+")").join(", "))}</td><td><button class="b sec" data-session="${s.id}">${t("open")}</button></td></tr>`).join("")}</table>`:t("noData");
+    $("#hSessions").querySelectorAll("[data-session]").forEach(b=>b.onclick=()=>openSession(+b.dataset.session));
+  }catch(e){$("#hSessions").textContent=errorText(e);}
+}
+async function openSession(id){
+  try{
+    HS=await api("get_session",{session_id:id});selectedEvent=null;selectedAnnotation=null;eventCursor=null;sampleCursor=null;
+    $("#hDetail").innerHTML=`<div class="card"><h2>#${id} - ${esc(tagged("status",HS.state))}</h2>
+     <p>${t("vehicle")}: ${HS.vehicle_id??t("unknown")}</p><div id="hAssign"></div>
+     <p>DTC (${t("historicalObservations")}): ${esc(HS.dtc_history.map(d=>d.code+" / "+tagged("status",d.category)).join(", ")||"—")}</p>
+     <label>${t("from")} <input id="hFrom" type="datetime-local" step="0.001" value="${localDate(HS.started_ms)}"></label>
+     <label>${t("to")} <input id="hTo" type="datetime-local" step="0.001" value="${localDate(HS.ended_ms??Date.now())}"></label>
+     <button id="hLoad" class="b">${t("refresh")}</button><p id="hNotice" class="mut"></p>
+     <h2>${t("events")}</h2><div id="hEvents"></div><button class="b sec" id="hMoreEvents">${t("next")}</button>
+     <h2>${t("samples")}</h2><div id="hSamples"></div><button class="b sec" id="hMoreSamples">${t("next")}</button>
+     <h2>${t("annotations")}</h2><div id="hAnnotations"></div>
+     <h2>${t("promptPreview")}</h2><div id="hPrompts"></div><div id="hPrompt"></div></div>`;
+    if(!HS.vehicle_id){
+      $("#hAssign").innerHTML=`<select id="hAssignId"><option value="">${t("selectVehicle")}</option>${HV.map(v=>`<option value="${v.id}">#${v.id} ${esc(v.name)}</option>`).join("")}</select> <input id="hNewName" placeholder="${t("newVehicle")}"><button id="hAssignButton" class="b sec">${t("assign")}</button>`;
+      $("#hAssignButton").onclick=async()=>{try{await api("assign_session_vehicle",{session_id:id,vehicle_id:$("#hAssignId").value?+$("#hAssignId").value:undefined,name:$("#hNewName").value});HV=await api("list_vehicles");await openSession(id)}catch(e){alert(errorText(e))}};
+    }
+    $("#hLoad").onclick=()=>loadTimeline();
+    $("#hMoreEvents").onclick=()=>loadEvents(eventCursor);
+    $("#hMoreSamples").onclick=()=>loadSamples(sampleCursor);
+    $("#hPrompts").innerHTML=PR.filter(p=>p.history).map(p=>`<button class="b sec" data-hprompt="${esc(p.id)}">${esc(t(`prompt.${p.id}.title`))}</button>`).join("");
+    $("#hPrompts").querySelectorAll("[data-hprompt]").forEach(b=>b.onclick=async()=>{try{await showPrompt(b.dataset.hprompt,{...historyRange(),vehicle_id:HS.vehicle_id,event_id:selectedEvent,annotation_id:selectedAnnotation},"#hPrompt")}catch(e){alert(errorText(e))}});
+    await loadTimeline();
+  }catch(e){$("#hDetail").textContent=errorText(e);}
+}
+async function loadTimeline(){await loadEvents();await loadSamples();await loadAnnotations();$("#hNotice").textContent="";}
+async function loadEvents(after){
+  try{
+    const r=await api("get_session_events",{...historyRange(),after_id:after??0,limit:30});eventCursor=r.next_after_id;
+    $("#hMoreEvents").disabled=!eventCursor;
+    $("#hEvents").innerHTML=r.events.map(e=>`<details><summary>${esc(date(e.t_ms))} - ${esc(tagged("event",e.kind))} #${e.id}</summary>${e.kind==="dtc_scan"||e.kind==="freeze_frame"?diagnosticView(e.kind==="dtc_scan"?"read_dtcs":"read_freeze_frame",e.data):`<pre>${esc(JSON.stringify(e.data,null,2))}</pre>`}<button class="b sec" data-event="${e.id}">${t("preview")} #${e.id}</button></details>`).join("")||t("noData");
+    $("#hEvents").querySelectorAll("[data-event]").forEach(b=>b.onclick=async()=>{selectedEvent=+b.dataset.event;try{await showPrompt("explain_previous_fault",{...historyRange(),vehicle_id:HS.vehicle_id,event_id:selectedEvent},"#hPrompt")}catch(e){alert(errorText(e))}});
+  }catch(e){$("#hEvents").textContent=errorText(e);}
+}
+async function loadSamples(after){
+  try{
+    const r=await api("query_session",{...historyRange(),after_rowid:after??0,limit:100});sampleCursor=r.next_after_rowid;
+    const rows=r.series.flatMap(s=>s.points.map(p=>({t_ms:r.t0_ms+p[0],name:s.pid,value:p[1],unit:s.unit,source:s.source}))).sort((a,b)=>a.t_ms-b.t_ms);
+    $("#hMoreSamples").disabled=!sampleCursor;
+    $("#hSamples").innerHTML=rows.length?`<div style="max-height:320px;overflow:auto"><table><tr><th>UTC</th><th>${t("sensor")}</th><th>${t("value")}</th><th>${t("source")}</th></tr>${rows.map(s=>`<tr><td>${esc(new Date(s.t_ms).toISOString())}</td><td title="${esc(s.name)}">${esc(tagged("pid",s.name))}</td><td>${esc(number(s.value,{maximumFractionDigits:8}))} ${esc(s.unit)}</td><td>${esc(tagged("source",s.source))}</td></tr>`).join("")}</table></div>`:t("noData");
+  }catch(e){$("#hSamples").textContent=errorText(e);}
+}
+async function loadAnnotations(){
+  try{
+    const rows=await api("list_fault_annotations",{session_id:HS.id});
+    $("#hAnnotations").innerHTML=rows.map(a=>`<div class="card"><b>#${a.id} ${esc(a.annotation.title)}</b> - ${esc(tagged("origin",a.annotation.origin))} / ${esc(tagged("status",a.annotation.status))} / ${t("revision")} ${a.revision} (${esc(a.annotation.updated_by||tagged("origin",a.annotation.origin))})
+     <p>${esc(a.annotation.assessment)}</p><p class="mut">${esc(new Date(a.annotation.from_ms).toISOString())} - ${esc(new Date(a.annotation.to_ms).toISOString())}</p>
+     <button class="b sec" data-ann="${a.id}" data-action="confirm">${t("confirm")}</button><button class="b sec" data-ann="${a.id}" data-action="reject">${t("reject")}</button><button class="b sec" data-ann="${a.id}" data-action="edit">${t("edit")}</button>
+     <button class="b sec" data-ann="${a.id}" data-action="open">${t("open")}</button></div>`).join("")||t("noData");
+    $("#hAnnotations").querySelectorAll("[data-ann]").forEach(b=>b.onclick=async()=>{
+      const a=rows.find(a=>a.id===+b.dataset.ann),body={...a.annotation,session_id:HS.id,annotation_id:a.id,expected_revision:a.revision};
+      if(b.dataset.action==="open"){selectedAnnotation=a.id;$("#hFrom").value=localDate(body.from_ms);$("#hTo").value=localDate(body.to_ms);await loadEvents();await loadSamples();return;}
+      if(b.dataset.action==="edit"){const value=prompt(t("edit"),body.assessment);if(value===null)return;body.assessment=value;}
+      else body.status=b.dataset.action==="confirm"?"confirmed":"rejected";
+      try{await api("save_fault_annotation",body);await loadAnnotations();}catch(e){alert(errorText(e))}
+    });
+  }catch(e){$("#hAnnotations").textContent=errorText(e);}
+}
+
+function rHelp(){
+  const body=encodeURIComponent(t("reportBody",{version:ST.app_version}));
+  $("#p-help").innerHTML=`<div class="card"><h2>${t("report")}</h2><p>${t("reportHint")}</p>
+   <button class="b" id="bRep">${t("save")}</button>
+   <a class="b" style="text-decoration:none;display:inline-block;background:#2a3748;color:#e6edf3;border-radius:6px;padding:8px 14px" target="_blank" rel="noopener" href="https://github.com/Avokid/obdtrace/issues/new?title=${encodeURIComponent(t("reportTitle"))}&amp;body=${body}">${t("githubIssue")}</a>
+   <pre id="repOut" class="hide"></pre></div>
+   <div class="card"><h2>${t("dataFolder")}</h2><code>${esc(ST.data_dir||"")}</code></div>`;
+  $("#bRep").onclick=async()=>{try{const r=await api("save_diagnostic_log",{duration_s:3600,include_raw:false});$("#repOut").classList.remove("hide");$("#repOut").textContent=JSON.stringify(r,null,2)}catch(e){alert(errorText(e))}};
+}
+
+function connectWs(){
+  const ws=new WebSocket(`ws://${location.host}/ws`,["obdtrace","auth."+browserToken]);
+  ws.onmessage=e=>{const m=JSON.parse(e.data);
+    if(m.type=="live"){LIVE=m.values;if((localStorage.tab||"connect")=="live")paintLive()}
+    else if(m.type=="status"){
+      const previous=ST.adapter;
+      updateStatus(m.status);
+      const tab=localStorage.tab||"connect";
+      if((tab==="live"&&previous?.connected!==ST.adapter?.connected)||tab==="rec"||
+         (tab==="connect"&&(previous?.connected!==ST.adapter?.connected||previous?.connecting!==ST.adapter?.connecting||previous?.error!==ST.adapter?.error||previous?.adapter!==ST.adapter?.adapter)))render(tab)
+    }
+    else if(m.type=="tool_call"||m.type=="client"){refresh().catch(e=>{$("#conn").textContent=errorText(e)})}};
+  ws.addEventListener("message",e=>{const m=JSON.parse(e.data);if(m.type==="history_changed"&&$("#hNotice"))$("#hNotice").textContent=t("historyChanged");});
+  ws.onclose=()=>setTimeout(connectWs,2000);
+}
+function updateStatus(status){if(ST.session_id!==status.session_id)LIVE={};ST=status;head();paintAiStatus()}
+async function refresh(){updateStatus(await (await apiFetch("/api/status")).json())}
+function matchLanguage(tag){
+  const base=tag?.toLowerCase().split(/[-_]/)[0];
+  return languages.find(([code])=>code.toLowerCase().split("-")[0]===base)?.[0];
+}
+async function loadLanguage(code){
+  if(i18next.hasResourceBundle(code,"translation"))return;
+  const reply=await apiFetch(`/api/locales/${encodeURIComponent(code)}`);
+  if(!reply.ok)throw new Error(reply.statusText);
+  i18next.addResourceBundle(code,"translation",await reply.json());
+}
+async function setLanguage(code){
+  await loadLanguage(code);
+  await i18next.changeLanguage(code);
+  L=code;
+  document.documentElement.lang=code;
+  $("#lang").value=code;
+  $("#lang").setAttribute("aria-label",t("language"));
+}
+(async()=>{
+  languages=await (await apiFetch("/api/languages")).json();
+  await i18next.init({lng:"en",fallbackLng:"en",supportedLngs:languages.map(([code])=>code),load:"currentOnly",
+    keySeparator:false,resources:{},interpolation:{escapeValue:false}});
+  const lang=$("#lang");
+  lang.innerHTML=languages.map(([id,label])=>`<option value="${esc(id)}">${esc(label)}</option>`).join("");
+  await loadLanguage("en");
+  const preferred=matchLanguage(localStorage.lang)||(navigator.languages||[navigator.language]).map(matchLanguage).find(Boolean)||"en";
+  try{await setLanguage(preferred)}catch(e){await setLanguage("en");console.warn(e)}
+  const onboarding=await apiFetch("/api/onboarding");
+  if(onboarding.status===401){
+    $("#conn").textContent=t("privateLaunch");lang.hidden=true;return;
+  }
+  OB=await onboarding.json(); PR=await (await apiFetch("/api/prompts")).json();
+  lang.onchange=async()=>{
+    lang.disabled=true;
+    try{await setLanguage(lang.value);localStorage.lang=L;head();nav();render(localStorage.tab||"connect")}
+    catch(e){lang.value=L;alert(errorText(e))}
+    finally{lang.disabled=false}
+  };
+  await refresh();
+  show(localStorage.tab||"connect");connectWs();
+  setInterval(()=>{if(["connect","rec","ai","live"].includes(localStorage.tab)){refresh().catch(e=>{$("#conn").textContent=errorText(e)})}},5000);
+})();
+</script>
+</body>
+</html>

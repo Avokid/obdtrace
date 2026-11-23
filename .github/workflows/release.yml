@@ -1,0 +1,104 @@
+name: Build and verify OBDTrace
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  no-private-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Reject logs, databases and vehicle keys
+        run: |
+          if git ls-files | grep -Ei '(^|/)(logs|exports|\.obdtrace-runtime)/|\.(log|db|db-journal|db-wal|db-shm|sqlite3?(-.*)?)$|(^|/)vehicle\.key$'; then
+            echo "::error::Logs, databases, exports and vehicle keys must never be committed."
+            exit 1
+          fi
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            exe: obdtrace
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            exe: obdtrace.exe
+          - os: macos-15
+            target: aarch64-apple-darwin
+            exe: obdtrace
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libdbus-1-dev libudev-dev
+      - run: rustup toolchain install 1.89.0 --profile minimal --target ${{ matrix.target }}
+      - run: cargo +1.89.0 test --locked --target ${{ matrix.target }}
+      - run: cargo +1.89.0 build --release --locked --target ${{ matrix.target }}
+      - name: Package and smoke-test the extracted executable
+        run: python scripts/package_release.py "${{ matrix.target }}" "target/${{ matrix.target }}/release/${{ matrix.exe }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: runner.os == 'Linux' && github.event.repository.private && github.event_name != 'pull_request'
+        with:
+          name: obdtrace-${{ matrix.target }}
+          path: dist/obdtrace-v*
+          if-no-files-found: error
+      - name: Prepare an MCPB candidate for desktop client testing
+        if: runner.os == 'macOS' && github.event.repository.private && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
+        run: python scripts/package_release.py "${{ matrix.target }}" "target/${{ matrix.target }}/release/${{ matrix.exe }}" --mcpb
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: runner.os == 'macOS' && github.event.repository.private && (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
+        with:
+          name: obdtrace-mcpb-candidate
+          path: dist/mcpb/
+          if-no-files-found: error
+
+  draft-release:
+    if: github.event.repository.private && github.ref_type == 'tag' && github.repository == 'Avokid/obdtrace'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: obdtrace-x86_64-unknown-linux-gnu
+          path: artifacts
+      - name: Verify the tag and stage release files
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os, pathlib, shutil, tomllib
+          version = tomllib.loads(pathlib.Path("Cargo.toml").read_text())["package"]["version"]
+          assert os.environ["RELEASE_TAG"] == f"v{version}", "Tag must match Cargo.toml"
+          release = pathlib.Path("release")
+          release.mkdir()
+          name = f"obdtrace-v{version}-x86_64-unknown-linux-gnu.tar.gz"
+          shutil.copyfile(pathlib.Path("artifacts") / name, release / name)
+          PY
+          (cd release && sha256sum obdtrace-* > SHA256SUMS)
+      - name: Create a draft for maintainer review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release/* --verify-tag --draft --generate-notes --title "OBDTrace $RELEASE_TAG"
