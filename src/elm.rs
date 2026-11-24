@@ -369,10 +369,17 @@ impl Elm {
         self.query_raw(req, self.timings.normal).await
     }
 
+    #[cfg(test)]
     pub async fn read_pid(&mut self, def: &PidDef) -> Result<f64, ElmError> {
-        let frames = self.query(&format!("01{:02X}", def.pid)).await?;
-        obd::decode_pid(def, &frames[0][2..])
-            .ok_or_else(|| ElmError::Malformed(format!("short reply for {}", def.name)))
+        let data = self.read_pid_bytes(def.pid).await?;
+        obd::decode_pid(def, &data)
+            .ok_or_else(|| ElmError::Malformed(format!("no usable value for {}", def.name)))
+    }
+
+    /// Mode 01 payload after the echoed PID, for decoding several values from one reply.
+    pub async fn read_pid_bytes(&mut self, pid: u8) -> Result<Vec<u8>, ElmError> {
+        let frames = self.query(&format!("01{pid:02X}")).await?;
+        Ok(frames[0].get(2..).unwrap_or_default().to_vec())
     }
 
     pub async fn read_dtcs(&mut self, mode: u8) -> Result<Vec<String>, ElmError> {

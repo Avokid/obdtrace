@@ -50,7 +50,9 @@ them externally.
 3. Use `query_session` for relevant original readings and `get_session_events`
    for DTC observations, freeze frames, connection/storage gaps and annotation
    revisions. For a long window, scan first with `bucket_ms` (per-bucket
-   min/avg/max), then read raw points for the interesting minutes. Follow
+   min/avg/max), then read raw points for the interesting minutes. Use
+   `layout: "table"` with `bucket_ms` to compare sensors such as
+   `commanded_lambda` and `o2_b1s1_lambda` on one time grid. Follow
    `next_after_rowid` as `after_rowid` (or `next_after_bucket` as
    `after_bucket`) and `next_after_id` as `after_id`, keeping the filters
    fixed. Start with a bounded window and pin `to_ms` for an active session.

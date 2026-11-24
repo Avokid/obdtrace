@@ -112,16 +112,22 @@ occurred. Use the original bounded `query_session` data for investigation.
 
 For a demo, connect `mock:audi_demo` (also used by the app's demo button and the
 `demo` CLI command). Each new demo session includes 32 seconds of simulated
-history, sampled twice per second across all generic OBD-II sensors implemented
-by the app. A `demo_seed` event describes the fixture and seeded samples use
+history, sampled twice per second across every sensor the demo car advertises
+(including a wideband upstream and a narrowband downstream oxygen sensor). A `demo_seed` event describes the fixture and seeded samples use
 the `demo_seed` source. The car stays stationary while the throttle, RPM, load
 and related signals rise and fall. Live simulated sampling continues after the
 fixture. This is not an Audi-specific diagnostic dataset (e.g. ABS, airbag,
 or proprietary VAG signals are not included).
 
 Find the session with `list_sessions`, then page through `query_session`. For
-oxygen-sensor history, pass `pids: ["o2_b1s1_voltage", "o2_b1s2_voltage"]`
-to select bank 1 voltages before and after the catalyst.
+oxygen-sensor history, check `list_supported_sensors` first: narrowband
+sensors report `o2_bXsY_voltage` (and `o2_bXsY_stft`), wideband sensors report
+`o2_bXsY_lambda` with `o2_bXsY_current` or `o2_bXsY_wr_voltage`, and
+`o2_sensor_locations` maps each prefix to the bank and sensor position the ECU
+reports. To compare the requested and measured mixture, query
+`pids: ["commanded_lambda", "o2_b1s1_lambda", "o2_b1s2_voltage"]` with
+`bucket_ms` and `layout: "table"`, which returns one row per bucket with one
+average column per sensor.
 
 `save_fault_annotation` stores an external assessment with session/time/PID or
 event evidence. `list_fault_annotations` returns current revisions.

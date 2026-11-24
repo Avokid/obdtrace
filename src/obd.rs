@@ -9,6 +9,9 @@ pub struct PidDef {
     pub len: usize,
     /// 0 = polled every cycle, 1 = every 5th cycle
     pub tier: u8,
+    /// Decimal places kept after decoding.
+    pub decimals: i32,
+    /// Returns NaN when the ECU marks the value as not applicable.
     pub f: fn(&[u8]) -> f64,
 }
 
@@ -23,6 +26,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "%",
         len: 1,
         tier: 0,
+        decimals: 2,
         f: |d| d[0] as f64 * 100.0 / 255.0,
     },
     PidDef {
@@ -31,6 +35,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "°C",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64 - 40.0,
     },
     PidDef {
@@ -39,6 +44,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "%",
         len: 1,
         tier: 0,
+        decimals: 2,
         f: |d| d[0] as f64 * 100.0 / 128.0 - 100.0,
     },
     PidDef {
@@ -47,6 +53,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "%",
         len: 1,
         tier: 0,
+        decimals: 2,
         f: |d| d[0] as f64 * 100.0 / 128.0 - 100.0,
     },
     PidDef {
@@ -55,6 +62,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "%",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64 * 100.0 / 128.0 - 100.0,
     },
     PidDef {
@@ -63,6 +71,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "%",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64 * 100.0 / 128.0 - 100.0,
     },
     PidDef {
@@ -71,6 +80,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "kPa",
         len: 1,
         tier: 0,
+        decimals: 2,
         f: |d| d[0] as f64,
     },
     PidDef {
@@ -79,6 +89,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "rpm",
         len: 2,
         tier: 0,
+        decimals: 2,
         f: |d| ab(d) / 4.0,
     },
     PidDef {
@@ -87,6 +98,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "km/h",
         len: 1,
         tier: 0,
+        decimals: 2,
         f: |d| d[0] as f64,
     },
     PidDef {
@@ -95,6 +107,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "°",
         len: 1,
         tier: 0,
+        decimals: 2,
         f: |d| d[0] as f64 / 2.0 - 64.0,
     },
     PidDef {
@@ -103,6 +116,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "°C",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64 - 40.0,
     },
     PidDef {
@@ -111,6 +125,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "g/s",
         len: 2,
         tier: 0,
+        decimals: 2,
         f: |d| ab(d) / 100.0,
     },
     PidDef {
@@ -119,6 +134,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "%",
         len: 1,
         tier: 0,
+        decimals: 2,
         f: |d| d[0] as f64 * 100.0 / 255.0,
     },
     PidDef {
@@ -127,6 +143,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "V",
         len: 2,
         tier: 0,
+        decimals: 3,
         f: |d| d[0] as f64 / 200.0,
     },
     PidDef {
@@ -135,7 +152,479 @@ pub const PIDS: &[PidDef] = &[
         unit: "V",
         len: 2,
         tier: 0,
+        decimals: 3,
         f: |d| d[0] as f64 / 200.0,
+    },
+    PidDef {
+        pid: 0x14,
+        name: "o2_b1s1_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x15,
+        name: "o2_b1s2_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x16,
+        name: "o2_b1s3_voltage",
+        unit: "V",
+        len: 2,
+        tier: 0,
+        decimals: 3,
+        f: |d| d[0] as f64 / 200.0,
+    },
+    PidDef {
+        pid: 0x16,
+        name: "o2_b1s3_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x17,
+        name: "o2_b1s4_voltage",
+        unit: "V",
+        len: 2,
+        tier: 0,
+        decimals: 3,
+        f: |d| d[0] as f64 / 200.0,
+    },
+    PidDef {
+        pid: 0x17,
+        name: "o2_b1s4_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x18,
+        name: "o2_b2s1_voltage",
+        unit: "V",
+        len: 2,
+        tier: 0,
+        decimals: 3,
+        f: |d| d[0] as f64 / 200.0,
+    },
+    PidDef {
+        pid: 0x18,
+        name: "o2_b2s1_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x19,
+        name: "o2_b2s2_voltage",
+        unit: "V",
+        len: 2,
+        tier: 0,
+        decimals: 3,
+        f: |d| d[0] as f64 / 200.0,
+    },
+    PidDef {
+        pid: 0x19,
+        name: "o2_b2s2_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x1A,
+        name: "o2_b2s3_voltage",
+        unit: "V",
+        len: 2,
+        tier: 0,
+        decimals: 3,
+        f: |d| d[0] as f64 / 200.0,
+    },
+    PidDef {
+        pid: 0x1A,
+        name: "o2_b2s3_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x1B,
+        name: "o2_b2s4_voltage",
+        unit: "V",
+        len: 2,
+        tier: 0,
+        decimals: 3,
+        f: |d| d[0] as f64 / 200.0,
+    },
+    PidDef {
+        pid: 0x1B,
+        name: "o2_b2s4_stft",
+        unit: "%",
+        len: 2,
+        tier: 0,
+        decimals: 2,
+        f: |d| {
+            if d[1] == 0xFF {
+                f64::NAN
+            } else {
+                d[1] as f64 * 100.0 / 128.0 - 100.0
+            }
+        },
+    },
+    PidDef {
+        pid: 0x24,
+        name: "o2_b1s1_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x24,
+        name: "o2_b1s1_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x25,
+        name: "o2_b1s2_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x25,
+        name: "o2_b1s2_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x26,
+        name: "o2_b1s3_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x26,
+        name: "o2_b1s3_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x27,
+        name: "o2_b1s4_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x27,
+        name: "o2_b1s4_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x28,
+        name: "o2_b2s1_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x28,
+        name: "o2_b2s1_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x29,
+        name: "o2_b2s2_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x29,
+        name: "o2_b2s2_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x2A,
+        name: "o2_b2s3_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x2A,
+        name: "o2_b2s3_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x2B,
+        name: "o2_b2s4_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x2B,
+        name: "o2_b2s4_wr_voltage",
+        unit: "V",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) * 8.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x34,
+        name: "o2_b1s1_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x34,
+        name: "o2_b1s1_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x35,
+        name: "o2_b1s2_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x35,
+        name: "o2_b1s2_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x36,
+        name: "o2_b1s3_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x36,
+        name: "o2_b1s3_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x37,
+        name: "o2_b1s4_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x37,
+        name: "o2_b1s4_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x38,
+        name: "o2_b2s1_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x38,
+        name: "o2_b2s1_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x39,
+        name: "o2_b2s2_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x39,
+        name: "o2_b2s2_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x3A,
+        name: "o2_b2s3_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x3A,
+        name: "o2_b2s3_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x3B,
+        name: "o2_b2s4_lambda",
+        unit: "λ",
+        len: 4,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
+    },
+    PidDef {
+        pid: 0x3B,
+        name: "o2_b2s4_current",
+        unit: "mA",
+        len: 4,
+        tier: 0,
+        decimals: 3,
+        f: |d| ab(&d[2..]) / 256.0 - 128.0,
+    },
+    PidDef {
+        pid: 0x44,
+        name: "commanded_lambda",
+        unit: "λ",
+        len: 2,
+        tier: 0,
+        decimals: 4,
+        f: |d| ab(d) * 2.0 / 65536.0,
     },
     PidDef {
         pid: 0x1F,
@@ -143,6 +632,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "s",
         len: 2,
         tier: 1,
+        decimals: 2,
         f: |d| ab(d),
     },
     PidDef {
@@ -151,6 +641,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "%",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64 * 100.0 / 255.0,
     },
     PidDef {
@@ -159,6 +650,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "km",
         len: 2,
         tier: 1,
+        decimals: 2,
         f: |d| ab(d),
     },
     PidDef {
@@ -167,6 +659,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "kPa",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64,
     },
     PidDef {
@@ -175,6 +668,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "V",
         len: 2,
         tier: 1,
+        decimals: 2,
         f: |d| ab(d) / 1000.0,
     },
     PidDef {
@@ -183,6 +677,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "°C",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64 - 40.0,
     },
     PidDef {
@@ -191,6 +686,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "°C",
         len: 1,
         tier: 1,
+        decimals: 2,
         f: |d| d[0] as f64 - 40.0,
     },
     PidDef {
@@ -199,6 +695,7 @@ pub const PIDS: &[PidDef] = &[
         unit: "L/h",
         len: 2,
         tier: 1,
+        decimals: 2,
         f: |d| ab(d) / 20.0,
     },
 ];
@@ -217,15 +714,52 @@ pub const DEFAULT_PIDS: &[&str] = &[
     "timing_advance",
     "o2_b1s1_voltage",
     "o2_b1s2_voltage",
+    "o2_b2s1_voltage",
+    "o2_b2s2_voltage",
+    "o2_b1s1_lambda",
+    "o2_b2s1_lambda",
+    "commanded_lambda",
     "control_module_voltage",
 ];
 
+/// First definition with this sensor name. A name can map to several PIDs
+/// (e.g. wideband lambda via 0x24.. or 0x34..); use [`resolve`] to read it.
 pub fn pid_by_name(name: &str) -> Option<&'static PidDef> {
     PIDS.iter().find(|p| p.name.eq_ignore_ascii_case(name))
 }
 
+/// Definition for a sensor name, preferring a PID the ECU advertises.
+pub fn resolve(
+    name: &str,
+    supported: Option<&std::collections::BTreeSet<u8>>,
+) -> Option<&'static PidDef> {
+    let mut defs = PIDS.iter().filter(|p| p.name.eq_ignore_ascii_case(name));
+    match supported {
+        Some(s) => defs
+            .find(|p| s.contains(&p.pid))
+            .or_else(|| pid_by_name(name)),
+        None => defs.next(),
+    }
+}
+
+/// Distinct sensor names in table order.
+pub fn sensor_names() -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for p in PIDS {
+        if !out.contains(&p.name) {
+            out.push(p.name);
+        }
+    }
+    out
+}
+
 pub fn pid_by_code(code: u8) -> Option<&'static PidDef> {
     PIDS.iter().find(|p| p.pid == code)
+}
+
+#[cfg(test)]
+pub fn defs_for_code(code: u8) -> impl Iterator<Item = &'static PidDef> {
+    PIDS.iter().filter(move |p| p.pid == code)
 }
 
 pub fn decode_pid(def: &PidDef, data: &[u8]) -> Option<f64> {
@@ -233,11 +767,28 @@ pub fn decode_pid(def: &PidDef, data: &[u8]) -> Option<f64> {
         return None;
     }
     let v = (def.f)(data);
-    v.is_finite().then_some(round(v))
+    let scale = 10f64.powi(def.decimals);
+    v.is_finite().then_some((v * scale).round() / scale)
 }
 
-fn round(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
+/// Oxygen sensor slots (index 0..8 of PIDs 0x14/0x24/0x34 + index) present
+/// according to PID 0x13 (2 banks x 4) or 0x1D (4 banks x 2). Sensor names
+/// always follow the 0x13 layout; the location is what the ECU reports.
+pub fn o2_locations(layout_pid: u8, bitmap: u8) -> Vec<(String, String)> {
+    (0..8)
+        .filter(|i| bitmap >> i & 1 != 0)
+        .map(|i| {
+            let (bank, sensor) = if layout_pid == 0x1D {
+                (i / 2 + 1, i % 2 + 1)
+            } else {
+                (i / 4 + 1, i % 4 + 1)
+            };
+            (
+                format!("o2_b{}s{}", i / 4 + 1, i % 4 + 1),
+                format!("bank {bank} sensor {sensor}"),
+            )
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -400,6 +951,65 @@ mod tests {
             Some(83.0)
         );
         assert_eq!(decode_pid(pid_by_name("rpm").unwrap(), &[0x1A]), None);
+    }
+
+    #[test]
+    fn oxygen_sensor_pids_decode_every_value() {
+        let narrow: Vec<_> = defs_for_code(0x14).collect();
+        assert_eq!(narrow.len(), 2);
+        let v = |name: &str, code: u8, d: &[u8]| {
+            decode_pid(defs_for_code(code).find(|p| p.name == name).unwrap(), d)
+        };
+        assert_eq!(v("o2_b1s1_voltage", 0x14, &[0x5A, 0x80]), Some(0.45));
+        assert_eq!(v("o2_b1s1_stft", 0x14, &[0x5A, 0x80]), Some(0.0));
+        assert_eq!(v("o2_b1s1_stft", 0x14, &[0x5A, 0xFF]), None);
+        assert_eq!(
+            v("o2_b2s1_lambda", 0x28, &[0x80, 0x00, 0x40, 0x00]),
+            Some(1.0)
+        );
+        assert_eq!(
+            v("o2_b2s1_wr_voltage", 0x28, &[0x80, 0x00, 0x40, 0x00]),
+            Some(2.0)
+        );
+        assert_eq!(
+            v("o2_b1s1_lambda", 0x34, &[0x7F, 0x00, 0x80, 0x80]),
+            Some(0.9922)
+        );
+        assert_eq!(
+            v("o2_b1s1_current", 0x34, &[0x7F, 0x00, 0x80, 0x80]),
+            Some(0.5)
+        );
+        assert_eq!(v("commanded_lambda", 0x44, &[0x80, 0x00]), Some(1.0));
+    }
+
+    #[test]
+    fn lambda_name_resolves_to_the_advertised_pid() {
+        let wide_current: std::collections::BTreeSet<u8> = [0x34].into();
+        assert_eq!(resolve("o2_b1s1_lambda", None).unwrap().pid, 0x24);
+        assert_eq!(
+            resolve("o2_b1s1_lambda", Some(&wide_current)).unwrap().pid,
+            0x34
+        );
+        assert_eq!(
+            sensor_names()
+                .iter()
+                .filter(|n| **n == "o2_b1s1_lambda")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn oxygen_sensor_locations_follow_the_reported_layout() {
+        assert_eq!(
+            o2_locations(0x13, 0b0001_0011),
+            vec![
+                ("o2_b1s1".into(), "bank 1 sensor 1".into()),
+                ("o2_b1s2".into(), "bank 1 sensor 2".into()),
+                ("o2_b2s1".into(), "bank 2 sensor 1".into()),
+            ]
+        );
+        assert_eq!(o2_locations(0x1D, 0b0000_0100)[0].1, "bank 2 sensor 1");
     }
 
     #[test]

@@ -113,6 +113,21 @@ session start), series list their `sources`, and `next_after_bucket` pages
 on whole buckets via `after_bucket`. Minimum and maximum keep short spikes
 visible, but locate and verify them with a narrow raw query.
 
+To compare sensors side by side (for example `commanded_lambda` against
+`o2_b1s1_lambda`, or upstream against downstream oxygen sensors), add
+`"layout":"table"` to a bucketed query:
+
+```json
+{"t0_ms":1767225600000,"bucket_ms":1000,"layout":"table","value":"avg",
+ "columns":["dt_ms","commanded_lambda","o2_b1s1_lambda","o2_b1s2_voltage"],
+ "units":["ms","λ","λ","V"],"rows":[[0,1.0,1.012,0.71],[1000,1.0,0.996,null]]}
+```
+
+Each row shares one time grid; `null` means that sensor had no sample in the
+bucket. Paging is the same as for buckets, and `limit` still counts PID
+buckets. If one PID was stored with two units, its column becomes
+`"pid [unit]"`.
+
 | Tool | Returned cursor → next argument | Default page size |
 | --- | --- | --- |
 | `list_sessions` | `next_before_id` → `before_id` | 50 |

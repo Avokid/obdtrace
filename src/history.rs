@@ -422,8 +422,17 @@ impl Db {
         if from > to {
             bail!("from_ms must not exceed to_ms");
         }
+        let table = match args.get("layout").filter(|v| !v.is_null()) {
+            None => false,
+            Some(v) if v == "series" => false,
+            Some(v) if v == "table" => true,
+            Some(_) => bail!("layout must be series or table"),
+        };
         if args.get("bucket_ms").is_some_and(|v| !v.is_null()) {
-            return self.query_buckets(args, meta, session, from, to, &pids, n);
+            return self.query_buckets(args, meta, session, from, to, &pids, n, table);
+        }
+        if table {
+            bail!("layout=table needs bucket_ms");
         }
         let mut q = self.conn.prepare("SELECT rowid,t_ms,name,value,unit,source FROM samples WHERE session_id=?1 AND t_ms>=?2 AND t_ms<=?3
             AND rowid>?4 AND (json_array_length(?5)=0 OR name IN(SELECT value FROM json_each(?5))) ORDER BY rowid LIMIT ?6")?;
@@ -492,6 +501,7 @@ impl Db {
         to: i64,
         pids: &Value,
         n: i64,
+        table: bool,
     ) -> Result<Value> {
         let width = integer(args, "bucket_ms")?;
         if !(100..=3_600_000).contains(&width) {
@@ -533,6 +543,9 @@ impl Db {
                 bail!("limit is smaller than the number of PIDs in one bucket; raise limit or select fewer pids");
             }
             next = buckets.last().map(|b| b.0);
+        }
+        if table {
+            return Ok(bucket_table(meta, from, width, &buckets, next));
         }
         let mut groups: std::collections::BTreeMap<
             (String, String),
@@ -811,6 +824,56 @@ impl Db {
     }
 }
 
+type Bucket = (i64, String, String, i64, f64, f64, f64, String);
+
+/// Pivots buckets into one row per time slot so sensors can be compared side by side.
+fn bucket_table(
+    meta: Value,
+    from: i64,
+    width: i64,
+    buckets: &[Bucket],
+    next: Option<i64>,
+) -> Value {
+    use std::collections::{BTreeMap, BTreeSet};
+    let keys: BTreeSet<(&str, &str)> = buckets
+        .iter()
+        .map(|b| (b.1.as_str(), b.2.as_str()))
+        .collect();
+    let mut units_per_pid: BTreeMap<&str, usize> = BTreeMap::new();
+    for (pid, _) in &keys {
+        *units_per_pid.entry(pid).or_default() += 1;
+    }
+    let index: BTreeMap<(&str, &str), usize> =
+        keys.iter().enumerate().map(|(i, k)| (*k, i)).collect();
+    let mut columns = vec![json!("dt_ms")];
+    let mut units = vec![json!("ms")];
+    for (pid, unit) in &keys {
+        columns.push(if units_per_pid[pid] > 1 {
+            json!(format!("{pid} [{unit}]"))
+        } else {
+            json!(pid)
+        });
+        units.push(json!(unit));
+    }
+    let mut sources = BTreeSet::new();
+    let mut rows: Vec<Vec<Value>> = Vec::new();
+    let mut current = None;
+    for (b, name, unit, _, _, avg, _, src) in buckets {
+        if current != Some(*b) {
+            current = Some(*b);
+            let mut row = vec![Value::Null; keys.len() + 1];
+            row[0] = json!(b * width);
+            rows.push(row);
+        }
+        sources.extend(src.split(',').map(str::to_string));
+        rows.last_mut().unwrap()[index[&(name.as_str(), unit.as_str())] + 1] =
+            json!((avg * 1000.0).round() / 1000.0);
+    }
+    json!({"session": meta, "t0_ms": from, "bucket_ms": width, "layout": "table", "value": "avg",
+        "columns": columns, "units": units, "sources": sources, "rows": rows,
+        "downsampled": true, "next_after_bucket": next})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -972,6 +1035,16 @@ mod tests {
             ])
         );
         assert!(rest["next_after_bucket"].is_null());
+        db.insert(sid, &[sample(1200, "speed", 40.0)]).unwrap();
+        let table = db
+            .query_samples(&json!({"session_id":sid,"from_ms":1000,"bucket_ms":1000,"layout":"table","pids":["rpm","speed"]}))
+            .unwrap();
+        assert_eq!(table["columns"], json!(["dt_ms", "rpm", "speed"]));
+        assert_eq!(table["rows"][0], json!([0, 1170.0, 40.0]));
+        assert_eq!(table["rows"][1], json!([1000, 750.0, null]));
+        assert!(db
+            .query_samples(&json!({"session_id":sid,"layout":"table"}))
+            .is_err());
         assert!(db
             .query_samples(&json!({"session_id":sid,"bucket_ms":1000,"after_rowid":1}))
             .is_err());

@@ -3,6 +3,12 @@
 
 use super::Transport;
 use crate::obd::{decode_pid, pid_by_code, PIDS};
+
+/// PIDs every simulated car answers (before scenario-specific changes).
+const BASE_PIDS: &[u8] = &[
+    0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x13, 0x14, 0x15,
+    0x1F, 0x2F, 0x31, 0x33, 0x42, 0x46, 0x5C, 0x5E,
+];
 use crate::store::Sample;
 use anyhow::{bail, Result};
 use async_trait::async_trait;
@@ -96,16 +102,17 @@ impl MockTransport {
             .step_by(500)
             .flat_map(|offset| {
                 let demo = &demo;
-                PIDS.iter().map(move |pid| Sample {
-                    t_ms: end_ms - DEMO_HISTORY_MS + offset,
-                    name: pid.name.into(),
-                    value: decode_pid(
-                        pid,
-                        &demo.encode(pid.pid, demo.value_at(pid.name, offset as f64 / 1000.0)),
-                    )
-                    .unwrap(),
-                    unit: pid.unit.into(),
-                })
+                let supported = demo.supported();
+                PIDS.iter()
+                    .filter(move |pid| supported.contains(&pid.pid))
+                    .filter_map(move |pid| {
+                        Some(Sample {
+                            t_ms: end_ms - DEMO_HISTORY_MS + offset,
+                            name: pid.name.into(),
+                            value: decode_pid(pid, &demo.payload(pid.pid, offset as f64 / 1000.0))?,
+                            unit: pid.unit.into(),
+                        })
+                    })
             })
             .collect())
     }
@@ -122,13 +129,15 @@ impl MockTransport {
 
     fn supported(&self) -> Vec<u8> {
         if self.scenario == AUDI_DEMO {
+            // Wideband upstream (0x34), narrowband downstream (0x15), commanded lambda.
             return std::iter::once(0x01)
-                .chain(PIDS.iter().map(|p| p.pid))
+                .chain(BASE_PIDS.iter().copied().filter(|p| *p != 0x14))
+                .chain([0x34, 0x44])
                 .collect();
         }
-        let mut v: Vec<u8> = PIDS
+        let mut v: Vec<u8> = BASE_PIDS
             .iter()
-            .map(|p| p.pid)
+            .copied()
             .filter(|p| ![0x08, 0x09, 0x5C, 0x5E].contains(p))
             .collect();
         v.push(0x01);
@@ -153,13 +162,54 @@ impl MockTransport {
         bits.to_vec()
     }
 
-    fn value(&self, name: &str) -> f64 {
+    fn now(&self) -> f64 {
         let offset = if self.scenario == AUDI_DEMO {
             DEMO_HISTORY_MS as f64 / 1000.0
         } else {
             0.0
         };
-        self.value_at(name, self.t() + offset)
+        self.t() + offset
+    }
+
+    /// Full Mode 01 payload for a PID, including every value it carries.
+    fn payload(&self, code: u8, t: f64) -> Vec<u8> {
+        let u16b = |x: f64| {
+            let n = x.clamp(0.0, 65535.0) as u16;
+            [(n >> 8) as u8, n as u8]
+        };
+        let slot = |base: u8| {
+            let i = code - base;
+            format!("o2_b{}s{}", i / 4 + 1, i % 4 + 1)
+        };
+        match code {
+            // Sensors present: bank 1 sensors 1 and 2.
+            0x13 => vec![0b0000_0011],
+            0x14..=0x1B => {
+                let prefix = slot(0x14);
+                let volt = self.value_at(&format!("{prefix}_voltage"), t);
+                let trim = self.value_at(&format!("{prefix}_stft"), t);
+                let trim = if trim.is_finite() {
+                    ((trim + 100.0) * 128.0 / 100.0).clamp(0.0, 254.0) as u8
+                } else {
+                    0xFF
+                };
+                vec![(volt * 200.0).clamp(0.0, 255.0) as u8, trim]
+            }
+            0x24..=0x2B | 0x34..=0x3B => {
+                let prefix = slot(if code >= 0x34 { 0x34 } else { 0x24 });
+                let lambda = u16b(self.value_at(&format!("{prefix}_lambda"), t) * 32768.0);
+                let second = if code >= 0x34 {
+                    u16b((self.value_at(&format!("{prefix}_current"), t) + 128.0) * 256.0)
+                } else {
+                    u16b(self.value_at(&format!("{prefix}_wr_voltage"), t) * 8192.0)
+                };
+                [lambda, second].concat()
+            }
+            0x44 => u16b(self.value_at("commanded_lambda", t) * 32768.0).to_vec(),
+            other => pid_by_code(other)
+                .map(|d| self.encode(other, self.value_at(d.name, t)))
+                .unwrap_or_else(|| vec![0]),
+        }
     }
 
     fn value_at(&self, name: &str, t: f64) -> f64 {
@@ -209,6 +259,15 @@ impl MockTransport {
                     0.65
                 }
             }
+            "o2_b1s1_stft" => 2.0 * (t * 2.0).sin(),
+            "commanded_lambda" => 1.0 - 0.12 * ((gas - 0.6) / 0.4).clamp(0.0, 1.0),
+            "o2_b1s1_lambda" => {
+                let lean = if self.scenario == "lean" { 0.06 } else { 0.0 };
+                self.value_at("commanded_lambda", t) + lean + 0.02 * (t * 2.0).sin()
+            }
+            "o2_b1s1_current" => (self.value_at("o2_b1s1_lambda", t) - 1.0) * 5.0,
+            "o2_b1s1_wr_voltage" => 3.3 + (self.value_at("o2_b1s1_lambda", t) - 1.0) * 4.0,
+            name if name.ends_with("_stft") => f64::NAN,
             "run_time" => 300.0 + t,
             "fuel_level" => 61.0,
             "distance_since_clear" => 12.0,
@@ -235,7 +294,6 @@ impl MockTransport {
             0x0C => u16b(v * 4.0),
             0x0E => u8b((v + 64.0) * 2.0),
             0x10 => u16b(v * 100.0),
-            0x14 | 0x15 => vec![(v * 200.0).clamp(0.0, 255.0) as u8, 0xFF],
             0x1F | 0x31 => u16b(v),
             0x42 => u16b(v * 1000.0),
             0x5E => u16b(v * 20.0),
@@ -300,12 +358,10 @@ impl MockTransport {
                 if p == 0x5E {
                     return "NO DATA".into();
                 }
-                match pid_by_code(p).filter(|_| self.supported().contains(&p)) {
-                    Some(def) => {
-                        let v = self.value(def.name);
-                        self.hex(&[&[0x41, p][..], &self.encode(p, v)].concat())
-                    }
-                    None => "NO DATA".into(),
+                if self.supported().contains(&p) && p != 0x01 {
+                    self.hex(&[&[0x41, p][..], &self.payload(p, self.now())].concat())
+                } else {
+                    "NO DATA".into()
                 }
             }
             (0x02, Some(p)) if bytes.len() >= 3 => {
@@ -316,15 +372,13 @@ impl MockTransport {
                     let (a, b) = self.dtcs[0];
                     return self.hex(&[0x42, 0x02, 0x00, a, b]);
                 }
-                let v = match p {
-                    0x0C => 2210.0,
-                    0x0D => 98.0,
-                    0x05 => 90.0,
-                    other => pid_by_code(other)
-                        .map(|d| self.value(d.name))
-                        .unwrap_or(0.0),
+                let data = match p {
+                    0x0C => self.encode(p, 2210.0),
+                    0x0D => self.encode(p, 98.0),
+                    0x05 => self.encode(p, 90.0),
+                    other => self.payload(other, self.now()),
                 };
-                self.hex(&[&[0x42, p, 0x00][..], &self.encode(p, v)].concat())
+                self.hex(&[&[0x42, p, 0x00][..], &data].concat())
             }
             (0x03, None) => self.dtc_reply(0x03, &self.dtcs.clone()),
             (0x07, None) => self.dtc_reply(0x07, &self.pending.clone()),

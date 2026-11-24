@@ -6,10 +6,12 @@ Bluetooth, serial and TCP adapters. It records every drive into a local session
 history and exposes it all over MCP, so an AI agent can read the car, query
 past recordings and compare behaviour before and after a repair.
 
-- **Data logger:** continuous recording of live PIDs, DTC events and adapter
-  state into a local SQLite history, browsable in the app and exportable.
+- **Data logger:** continuous recording of live PIDs (including narrowband and
+  wideband oxygen sensors and commanded lambda), DTC events and adapter state
+  into a local SQLite history, browsable in the app and exportable.
 - **Agent-ready:** an MCP server with diagnostic and history tools (compact
-  JSON time series, bucketed summaries, similar-condition search). MCP is the
+  JSON time series, bucketed summaries, aligned multi-sensor tables,
+  similar-condition search). MCP is the
   only agent interface; `OBDTRACE_READ_ONLY=1` limits a server to reads, and
   clearing codes needs explicit opt-in and human confirmation.
 - **Local first:** one Rust binary with a browser UI. It works without an AI

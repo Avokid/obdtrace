@@ -35,7 +35,7 @@ start_recording and stop_recording only mark a named interval. If exposed and re
 A server started with OBDTRACE_READ_ONLY=1 does not expose these write operations. For details, read the MCP resource obd://history-guide if the client supports resources.
 
 For archive analysis, use list_vehicles, list_sessions and get_session to select the right session and check sample_coverage. Use vehicle_id rather than masked VIN. \
-Use query_session for samples and get_session_events for context; keep PID/time ranges narrow, use UTC epoch milliseconds, and follow returned cursors with the same filters. query_session returns per-PID series with points [dt_ms, value] relative to t0_ms; for long ranges scan first with bucket_ms (points [dt_ms, n, min, avg, max]) and then read raw points for short windows. \
+Use query_session for samples and get_session_events for context; keep PID/time ranges narrow, use UTC epoch milliseconds, and follow returned cursors with the same filters. query_session returns per-PID series with points [dt_ms, value] relative to t0_ms; for long ranges scan first with bucket_ms (points [dt_ms, n, min, avg, max]) and then read raw points for short windows. To compare sensors on one time grid (e.g. commanded_lambda vs o2_b1s1_lambda, or upstream vs downstream O2), add layout=table with bucket_ms. list_supported_sensors gives o2_sensor_locations for each o2_bXsY prefix. \
 Pin the end time while paging an active session. Check sample sources, gaps and comparable operating conditions; demo_seed is simulated. Missing data or no comparable interval is not evidence that a fault is absent.
 
 Report evidence with timestamps, units and what could not be verified. Codes indicate failed tests, not failed parts. Generic OBD-II does not cover every module. \
@@ -552,15 +552,22 @@ mod tests {
             serde_json::from_str::<Value>(r["result"]["content"][0]["text"].as_str().unwrap())
                 .unwrap()
         };
-        let pids = crate::obd::PIDS;
         let supported = decode(rpc(&m, query("list_supported_sensors", json!({}))).await);
-        assert_eq!(
-            supported["supported_sensor_names"]
-                .as_array()
-                .unwrap()
-                .len(),
-            pids.len()
-        );
+        let names: Vec<&str> = supported["supported_sensor_names"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_str().unwrap())
+            .collect();
+        for name in [
+            "o2_b1s1_lambda",
+            "o2_b1s1_current",
+            "o2_b1s2_voltage",
+            "commanded_lambda",
+        ] {
+            assert!(names.contains(&name), "{name} missing");
+        }
+        assert!(!names.contains(&"o2_b1s1_voltage"));
         let events = decode(
             rpc(
                 &m,
@@ -586,13 +593,45 @@ mod tests {
             }
             args["after_rowid"] = result["next_after_rowid"].clone();
         }
-        for pid in pids {
-            let rows: Vec<_> = samples.iter().filter(|s| s["name"] == pid.name).collect();
-            assert!(rows.len() >= 61, "{} has incomplete coverage", pid.name);
+        // 0xFF in the trim byte means the sensor is not used for trim.
+        for name in names.iter().filter(|n| **n != "o2_b1s2_stft") {
+            let unit = crate::obd::pid_by_name(name).unwrap().unit;
+            let rows: Vec<_> = samples.iter().filter(|s| s["name"] == *name).collect();
+            assert!(rows.len() >= 61, "{name} has incomplete coverage");
             assert!(rows
                 .iter()
-                .all(|s| s["source"] == "demo_seed" && s["unit"] == pid.unit));
+                .all(|s| s["source"] == "demo_seed" && s["unit"] == unit));
         }
+        assert!(!samples.iter().any(|s| s["name"] == "o2_b1s2_stft"));
+        assert_eq!(
+            supported["o2_sensor_locations"]["sensors"][1]["location"],
+            "bank 1 sensor 2"
+        );
+        let table = decode(
+            rpc(
+                &m,
+                query(
+                    "query_session",
+                    json!({"session_id":session,"from_ms":end-10_000,"to_ms":end,"bucket_ms":1000,
+                        "layout":"table","pids":["commanded_lambda","o2_b1s1_lambda","o2_b1s2_voltage"]}),
+                ),
+            )
+            .await,
+        );
+        assert_eq!(
+            table["columns"],
+            json!([
+                "dt_ms",
+                "commanded_lambda",
+                "o2_b1s1_lambda",
+                "o2_b1s2_voltage"
+            ])
+        );
+        assert!(table["rows"].as_array().unwrap().iter().all(|r| r
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v.is_number())));
         let peak = samples
             .iter()
             .filter(|s| s["name"] == "throttle")

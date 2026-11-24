@@ -381,16 +381,25 @@ impl Hub {
             }
             let (names, interval, supported) =
                 self.with(|i| (i.sampling_pids(), i.interval_ms, i.supported.clone()));
-            let defs: Vec<&'static PidDef> = names
+            // Values that share a PID (e.g. O2 voltage and trim) come from one
+            // request and are stored with the same timestamp.
+            let mut groups: Vec<(u8, Vec<&'static PidDef>)> = Vec::new();
+            for def in names
                 .iter()
-                .filter_map(|n| obd::pid_by_name(n))
+                .filter_map(|n| obd::resolve(n, supported.as_ref()))
                 .filter(|d| {
                     !dead.contains(&d.pid)
                         && supported.as_ref().map_or(true, |s| s.contains(&d.pid))
                 })
                 .filter(|d| d.tier == 0 || cycle % 5 == 0)
-                .collect();
-            if defs.is_empty() {
+            {
+                match groups.iter_mut().find(|g| g.0 == def.pid) {
+                    Some(g) if !g.1.iter().any(|d| d.name == def.name) => g.1.push(def),
+                    Some(_) => {}
+                    None => groups.push((def.pid, vec![def])),
+                }
+            }
+            if groups.is_empty() {
                 if now_ms() - last_flush >= 1000 {
                     if let Err(e) = self.flush_recording() {
                         self.storage_failure(&e);
@@ -401,7 +410,7 @@ impl Hub {
                 cycle += 1;
                 continue;
             }
-            for def in defs {
+            for (code, defs) in groups {
                 let _operation = self.operations.lock().await;
                 if !self.current(gen) {
                     return;
@@ -409,35 +418,41 @@ impl Hub {
                 let (res, raw) = {
                     let mut g = self.elm.lock().await;
                     let Some(e) = g.as_mut() else { return };
-                    let r = e.read_pid(def).await;
+                    let r = e.read_pid_bytes(code).await;
                     (r, e.take_raw())
                 };
+                let t_ms = now_ms();
                 let mut reconnect = false;
                 self.with(|i| {
                     for r in raw {
                         i.ring.push_raw(r);
                     }
                     match &res {
-                        Ok(v) => {
-                            let s = Sample {
-                                t_ms: now_ms(),
-                                name: def.name.into(),
-                                value: *v,
-                                unit: def.unit.into(),
-                            };
-                            i.latest.insert(s.name.clone(), s.clone());
-                            if i.pending.len() < 10_000 {
-                                i.pending.push(s.clone());
-                            } else {
-                                i.storage_error = Some(
-                                    "Storage backlog full; samples are missing from the archive"
-                                        .into(),
-                                );
+                        Ok(data) => {
+                            for def in &defs {
+                                let Some(value) = obd::decode_pid(def, data) else {
+                                    continue;
+                                };
+                                let s = Sample {
+                                    t_ms,
+                                    name: def.name.into(),
+                                    value,
+                                    unit: def.unit.into(),
+                                };
+                                i.latest.insert(s.name.clone(), s.clone());
+                                if i.pending.len() < 10_000 {
+                                    i.pending.push(s.clone());
+                                } else {
+                                    i.storage_error = Some(
+                                        "Storage backlog full; samples are missing from the archive"
+                                            .into(),
+                                    );
+                                }
+                                if let Some(r) = i.recording.as_mut() {
+                                    r.count += 1;
+                                }
+                                i.ring.push(s);
                             }
-                            if let Some(r) = i.recording.as_mut() {
-                                r.count += 1;
-                            }
-                            i.ring.push(s);
                         }
                         Err(e) if e.is_link_failure() => reconnect = true,
                         Err(_) => {}
@@ -445,13 +460,13 @@ impl Hub {
                 });
                 match res {
                     Ok(_) => {
-                        fails.remove(&def.pid);
+                        fails.remove(&code);
                     }
                     Err(ElmError::NoData) => {
-                        let n = fails.entry(def.pid).or_insert(0);
+                        let n = fails.entry(code).or_insert(0);
                         *n += 1;
                         if *n >= 3 {
-                            dead.insert(def.pid);
+                            dead.insert(code);
                         }
                     }
                     Err(_) => {}
@@ -810,43 +825,59 @@ impl Hub {
 
     pub async fn live(&self, names: &[String]) -> Result<Value> {
         let _operation = self.operations.lock().await;
-        let names: Vec<String> = if names.is_empty() {
-            self.with(|i| i.sampling_pids())
-        } else {
-            names.to_vec()
-        };
+        let (names, supported) = self.with(|i| {
+            let names = if names.is_empty() {
+                i.sampling_pids()
+            } else {
+                names.to_vec()
+            };
+            (names, i.supported.clone())
+        });
+        let mut replies: HashMap<u8, (i64, Result<Vec<u8>, String>)> = HashMap::new();
         let mut out = serde_json::Map::new();
         for n in names {
-            let Some(def) = obd::pid_by_name(&n) else {
+            let Some(def) = obd::resolve(&n, supported.as_ref()) else {
                 out.insert(n.clone(), json!({"error": "unknown sensor"}));
                 continue;
             };
-            match self.with_elm(|e| Box::pin(e.read_pid(def))).await {
-                Ok(v) => {
-                    let sample = Sample {
-                        t_ms: now_ms(),
-                        name: def.name.into(),
-                        value: v,
-                        unit: def.unit.into(),
-                    };
-                    let id = self
-                        .with(|i| i.session_id)
-                        .ok_or_else(|| anyhow!("no active session"))?;
-                    let result = self.db.lock().unwrap().insert_direct(id, &sample);
-                    if let Err(e) = result {
-                        self.storage_failure(&e);
-                        return Err(e);
-                    }
-                    self.with(|i| {
-                        i.latest.insert(def.name.into(), sample.clone());
-                        i.ring.push(sample);
-                    });
-                    out.insert(n, json!({"value": v, "unit": def.unit}));
-                }
-                Err(e) => {
-                    out.insert(n, json!({"error": e.to_string()}));
-                }
+            if !replies.contains_key(&def.pid) {
+                let r = self.with_elm(|e| Box::pin(e.read_pid_bytes(def.pid))).await;
+                replies.insert(def.pid, (now_ms(), r.map_err(|e| e.to_string())));
             }
+            let (t_ms, reply) = &replies[&def.pid];
+            let value = match reply {
+                Ok(data) => obd::decode_pid(def, data),
+                Err(e) => {
+                    out.insert(n, json!({"error": e}));
+                    continue;
+                }
+            };
+            let Some(v) = value else {
+                out.insert(
+                    n,
+                    json!({"error": "the ECU reported no usable value for this sensor"}),
+                );
+                continue;
+            };
+            let sample = Sample {
+                t_ms: *t_ms,
+                name: def.name.into(),
+                value: v,
+                unit: def.unit.into(),
+            };
+            let id = self
+                .with(|i| i.session_id)
+                .ok_or_else(|| anyhow!("no active session"))?;
+            let result = self.db.lock().unwrap().insert_direct(id, &sample);
+            if let Err(e) = result {
+                self.storage_failure(&e);
+                return Err(e);
+            }
+            self.with(|i| {
+                i.latest.insert(def.name.into(), sample.clone());
+                i.ring.push(sample);
+            });
+            out.insert(n, json!({"value": v, "unit": def.unit}));
         }
         Ok(json!({"read_at": iso(now_ms()), "sensors": out}))
     }
@@ -854,15 +885,36 @@ impl Hub {
     pub async fn supported(&self) -> Result<Value> {
         let _operation = self.operations.lock().await;
         let s = self.with_elm(|e| Box::pin(e.supported_pids())).await?;
-        let known: Vec<Value> = obd::PIDS
+        let names = obd::sensor_names();
+        let has = |name: &str| {
+            obd::PIDS
+                .iter()
+                .any(|d| d.name == name && s.contains(&d.pid))
+        };
+        let known: Vec<Value> = names
             .iter()
-            .map(|d| json!({"name": d.name, "unit": d.unit, "supported": s.contains(&d.pid)}))
+            .map(|n| {
+                json!({"name": n, "unit": obd::pid_by_name(n).unwrap().unit,
+                    "supported": has(n), "pid": obd::resolve(n, Some(&s)).map(|d| format!("{:02X}", d.pid))})
+            })
             .collect();
+        let mut o2 = Value::Null;
+        for layout in [0x1D, 0x13] {
+            if s.contains(&layout) {
+                if let Ok(data) = self.with_elm(|e| Box::pin(e.read_pid_bytes(layout))).await {
+                    if let Some(bits) = data.first() {
+                        o2 = json!({"layout_pid": format!("{layout:02X}"), "sensors": obd::o2_locations(layout, *bits)
+                            .into_iter().map(|(prefix, location)| json!({"prefix": prefix, "location": location})).collect::<Vec<_>>()});
+                        break;
+                    }
+                }
+            }
+        }
         self.with(|i| i.supported = Some(s.clone()));
         Ok(
-            json!({"supported_sensor_names": obd::PIDS.iter().filter(|d| s.contains(&d.pid)).map(|d| d.name).collect::<Vec<_>>(),
-            "sensors": known, "advertised_pid_count": s.len(),
-            "note": "Advertised support does not guarantee a reading; some clone adapters advertise PIDs the car does not answer."}),
+            json!({"supported_sensor_names": names.iter().filter(|n| has(n)).collect::<Vec<_>>(),
+            "sensors": known, "advertised_pid_count": s.len(), "o2_sensor_locations": o2,
+            "note": "Advertised support does not guarantee a reading; some clone adapters advertise PIDs the car does not answer. o2_bXsY names follow the PID 13 layout; o2_sensor_locations gives the physical bank and sensor the ECU reports for each prefix."}),
         )
     }
 
@@ -945,8 +997,12 @@ impl Hub {
         };
         let mut vals = serde_json::Map::new();
         if dtc.is_some() {
+            let supported = self.with(|i| i.supported.clone());
             for n in DEFAULT_PIDS {
-                let def = obd::pid_by_name(n).unwrap();
+                let def = obd::resolve(n, supported.as_ref()).unwrap();
+                if supported.as_ref().is_some_and(|s| !s.contains(&def.pid)) {
+                    continue;
+                }
                 match self.with_elm(|e| Box::pin(e.freeze_frame_pid(def))).await {
                     Ok(v) => {
                         vals.insert(n.to_string(), json!({"value": v, "unit": def.unit}));
