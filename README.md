@@ -1,8 +1,18 @@
 # OBDTrace
 
-Local OBD-II diagnostics, session history and MCP for ELM327-compatible Bluetooth,
-serial and TCP adapters. OBDTrace works without an AI client; if you connect one,
-it interprets the observations. The app itself makes no AI-service calls. MIT licensed.
+**An agentic OBD-II reader with a built-in data logger.** OBDTrace reads fault
+codes, freeze frames, readiness and live sensors from ELM327-compatible
+Bluetooth, serial and TCP adapters. It records every drive into a local session
+history and exposes it all over MCP, so an AI agent can read the car, query
+past recordings and compare behaviour before and after a repair.
+
+- **Data logger:** continuous recording of live PIDs, DTC events and adapter
+  state into a local SQLite history, browsable in the app and exportable.
+- **Agent-ready:** an MCP server with diagnostic and history tools (compact
+  JSON time series, bucketed summaries, similar-condition search). Copilot CLI
+  gets a read-only profile; clearing codes needs explicit confirmation.
+- **Local first:** one Rust binary with a browser UI. It works without an AI
+  client and makes no AI-service or cloud calls itself. MIT licensed.
 
 ## Install and try the demo
 

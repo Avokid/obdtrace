@@ -2,7 +2,7 @@
 name = "obdtrace"
 version = "1.0.0"
 edition = "2021"
-description = "OBD-II MCP server and local app: BLE/Bluetooth/WiFi ELM327 adapters, live data recording and AI-assisted diagnostics"
+description = "Agentic OBD-II reader and data logger: ELM327 Bluetooth/serial/TCP adapters, local session history and an MCP server for AI agents"
 license = "MIT"
 repository = "https://github.com/Avokid/obdtrace"
 rust-version = "1.89"
