@@ -33,6 +33,7 @@ from the versioned download link below.
 | bitflags | 1.3.2 | Transitive | MIT/Apache-2.0 | [source](https://static.crates.io/crates/bitflags/bitflags-1.3.2.crate) |
 | bitflags | 2.13.2 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/bitflags/bitflags-2.13.2.crate) |
 | block-buffer | 0.10.4 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/block-buffer/block-buffer-0.10.4.crate) |
+| block-buffer | 0.12.1 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/block-buffer/block-buffer-0.12.1.crate) |
 | bluez-async | 0.8.2 | Direct | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/bluez-async/bluez-async-0.8.2.crate) |
 | bluez-generated | 0.4.0 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/bluez-generated/bluez-generated-0.4.0.crate) |
 | btleplug | 0.11.8 | Direct | MIT/Apache-2.0/BSD-3-Clause | [source](https://static.crates.io/crates/btleplug/btleplug-0.11.8.crate) |
@@ -44,16 +45,22 @@ from the versioned download link below.
 | clap_builder | 4.6.7 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/clap_builder/clap_builder-4.6.7.crate) |
 | clap_derive | 4.6.8 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/clap_derive/clap_derive-4.6.8.crate) |
 | clap_lex | 1.1.2 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/clap_lex/clap_lex-1.1.2.crate) |
+| cmov | 0.5.4 | Transitive | Apache-2.0 OR MIT | [source](https://static.crates.io/crates/cmov/cmov-0.5.4.crate) |
 | colorchoice | 1.0.5 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/colorchoice/colorchoice-1.0.5.crate) |
+| const-oid | 0.10.3 | Transitive | Apache-2.0 OR MIT | [source](https://static.crates.io/crates/const-oid/const-oid-0.10.3.crate) |
 | cpufeatures | 0.2.17 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/cpufeatures/cpufeatures-0.2.17.crate) |
+| cpufeatures | 0.3.1 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/cpufeatures/cpufeatures-0.3.1.crate) |
 | crossbeam-utils | 0.8.23 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.23.crate) |
 | crypto-common | 0.1.7 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/crypto-common/crypto-common-0.1.7.crate) |
+| crypto-common | 0.2.2 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/crypto-common/crypto-common-0.2.2.crate) |
+| ctutils | 0.4.8 | Transitive | Apache-2.0 OR MIT | [source](https://static.crates.io/crates/ctutils/ctutils-0.4.8.crate) |
 | dashmap | 6.2.1 | Transitive | MIT | [source](https://static.crates.io/crates/dashmap/dashmap-6.2.1.crate) |
 | data-encoding | 2.11.1 | Transitive | MIT | [source](https://static.crates.io/crates/data-encoding/data-encoding-2.11.1.crate) |
 | dbus | 0.9.12 | Transitive | Apache-2.0/MIT | [source](https://static.crates.io/crates/dbus/dbus-0.9.12.crate) |
 | dbus-tokio | 0.7.6 | Transitive | Apache-2.0/MIT | [source](https://static.crates.io/crates/dbus-tokio/dbus-tokio-0.7.6.crate) |
 | deranged | 0.5.9 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/deranged/deranged-0.5.9.crate) |
 | digest | 0.10.7 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/digest/digest-0.10.7.crate) |
+| digest | 0.11.3 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/digest/digest-0.11.3.crate) |
 | either | 1.19.0 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/either/either-1.19.0.crate) |
 | errno | 0.3.15 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/errno/errno-0.3.15.crate) |
 | fallible-iterator | 0.3.0 | Transitive | MIT/Apache-2.0 | [source](https://static.crates.io/crates/fallible-iterator/fallible-iterator-0.3.0.crate) |
@@ -80,12 +87,13 @@ from the versioned download link below.
 | hashbrown | 0.17.2 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/hashbrown/hashbrown-0.17.2.crate) |
 | hashlink | 0.12.2 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/hashlink/hashlink-0.12.2.crate) |
 | heck | 0.5.0 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/heck/heck-0.5.0.crate) |
-| hmac | 0.12.1 | Direct | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/hmac/hmac-0.12.1.crate) |
+| hmac | 0.13.0 | Direct | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/hmac/hmac-0.13.0.crate) |
 | http | 1.5.0 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/http/http-1.5.0.crate) |
 | http-body | 1.1.0 | Transitive | MIT | [source](https://static.crates.io/crates/http-body/http-body-1.1.0.crate) |
 | http-body-util | 0.1.5 | Transitive | MIT | [source](https://static.crates.io/crates/http-body-util/http-body-util-0.1.5.crate) |
 | httparse | 1.10.1 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/httparse/httparse-1.10.1.crate) |
 | httpdate | 1.0.3 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/httpdate/httpdate-1.0.3.crate) |
+| hybrid-array | 0.4.15 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/hybrid-array/hybrid-array-0.4.15.crate) |
 | hyper | 1.12.0 | Transitive | MIT | [source](https://static.crates.io/crates/hyper/hyper-1.12.0.crate) |
 | hyper-util | 0.1.21 | Transitive | MIT | [source](https://static.crates.io/crates/hyper-util/hyper-util-0.1.21.crate) |
 | is_terminal_polyfill | 1.70.2 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/is_terminal_polyfill/is_terminal_polyfill-1.70.2.crate) |
@@ -142,7 +150,7 @@ from the versioned download link below.
 | serde_urlencoded | 0.7.1 | Transitive | MIT/Apache-2.0 | [source](https://static.crates.io/crates/serde_urlencoded/serde_urlencoded-0.7.1.crate) |
 | serialport | 4.10.1 | Transitive | MPL-2.0 | [source](https://static.crates.io/crates/serialport/serialport-4.10.1.crate) |
 | sha1 | 0.10.7 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/sha1/sha1-0.10.7.crate) |
-| sha2 | 0.10.9 | Direct | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/sha2/sha2-0.10.9.crate) |
+| sha2 | 0.11.1 | Direct | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/sha2/sha2-0.11.1.crate) |
 | sharded-slab | 0.1.7 | Transitive | MIT | [source](https://static.crates.io/crates/sharded-slab/sharded-slab-0.1.7.crate) |
 | shlex | 2.0.1 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/shlex/shlex-2.0.1.crate) |
 | signal-hook-registry | 1.4.8 | Transitive | MIT OR Apache-2.0 | [source](https://static.crates.io/crates/signal-hook-registry/signal-hook-registry-1.4.8.crate) |
