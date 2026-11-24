@@ -69,8 +69,8 @@ In a private repository the Apple silicon build produces a separate `obdtrace-mc
 artifact on tag or manual runs. It contains a native `.mcpb` bundle and
 matching `server.json`. This is a candidate for a client that supports
 Apple silicon MCPB bundles, not a universal installer. The binary runs
-`obdtrace mcp` over stdio. The bundle does not supply the narrower Copilot CLI
-allowlist; it does not enable code clearing or auto-connect by default.
+`obdtrace mcp` over stdio. The bundle does not set `OBDTRACE_READ_ONLY`;
+it does not enable code clearing or auto-connect by default.
 
 Before listing: install the bundle on a clean Apple silicon system in an
 MCPB-capable desktop client, verify MCP discovery and demo history, and

@@ -233,9 +233,9 @@ async function rRec(){
     $("#recList").innerHTML=Array.isArray(a)&&a.length?`<table>${a.map(x=>`<tr><td>#${x.id}</td><td>${esc(x.label)}</td><td>${esc(x.started||x.start||"")}</td><td>${x.samples??""}</td></tr>`).join("")}</table>`:"—"}catch(e){$("#recList").textContent=errorText(e)}
 }
 
-const AI_CLIENTS={"copilot-cli":"GitHub Copilot CLI",vscode:"VS Code / GitHub Copilot","claude-desktop":"Claude Desktop","claude-code":"Claude Code"};
+const AI_CLIENTS={vscode:"VS Code / GitHub Copilot","claude-desktop":"Claude Desktop","claude-code":"Claude Code"};
 let aiClient="";
-const aiAnswers={},aiFeedback={},aiSaving=new Set(),aiSaved=new Set();
+const aiAnswers={},aiFeedback={};
 
 function rAiSetup(){
   $("#aiSetup").innerHTML=`
@@ -265,32 +265,18 @@ function rAiGuide(){
   if(!root)return;
   root.innerHTML="";
   if(!answer)return;
-  const cli=client==="copilot-cli",code=client==="claude-code",feedback=aiFeedback[client];
-  const demo=(ST.adapter?.connected||ST.adapter?.connecting)&&(ST.target||"").split(":")[0]==="mock";
-  if(cli&&demo){root.innerHTML=`<p class="warn">${t("copilotDemo")}</p>`;return}
+  const code=client==="claude-code",feedback=aiFeedback[client];
   const isNew=answer==="new",copied=feedback?.key==="configCopied";
   const path=OB.config_paths?.[client]||"";
-  const ready={vscode:"vscodeReady","copilot-cli":"copilotReady","claude-desktop":"claudeDesktopReady"}[client];
-  const prompt=t("testPrompt",{server:cli?"obdtrace-auto":"obdtrace"});
+  const ready={vscode:"vscodeReady","claude-desktop":"claudeDesktopReady"}[client];
+  const prompt=t("testPrompt",{server:"obdtrace"});
   root.innerHTML=`
     ${isNew&&(code?`<p>${t("claudeCodeSetup")}</p><pre>${esc(OB.cli?.[client])}</pre>`:
-      `<p class="mut">${esc(path)}</p>${cli?`<p class="mut">${t("copilotHint")}</p>`:""}
-      <button class="b" id="aiWrite" ${aiSaving.has(client)?"disabled":""}>${t(cli?"enableCopilot":"write")}</button>
-      <button class="b sec" id="aiCopy">${t("copyConfig")}</button>`)||""}
+      `<p class="mut">${esc(path)}</p>
+      <button class="b" id="aiCopy">${t("copyConfig")}</button>`)||""}
     <p class="${feedback?.error?"bad":"ok"}" aria-live="polite">${isNew?esc(feedback?.error?errorText(feedback.error):feedback?.key?t(feedback.key):""):""}${isNew&&copied?` <code>${esc(path)}</code>`:""}</p>
-    ${!isNew||aiSaved.has(client)||copied||code?`<div class="step">
+    ${!isNew||copied||code?`<div class="step">
       ${ready?`<p>${t(ready)}</p>`:""}<p>${t("testHint")}</p><pre>${esc(prompt)}</pre></div>`:""}`;
-  if($("#aiWrite"))$("#aiWrite").onclick=async()=>{
-    aiSaving.add(client);
-    $("#aiWrite").disabled=true;
-    try{
-      const r=await post("/api/write-config",{client});
-      if(!r.ok)throw new Error(r.error);
-      aiSaved.add(client);
-      aiFeedback[client]={key:"aiSaved"};
-    }catch(e){aiFeedback[client]={error:e.message}}
-    finally{aiSaving.delete(client);if(aiClient===client)rAiGuide()}
-  };
   if($("#aiCopy"))$("#aiCopy").onclick=async()=>{
     try{
       await navigator.clipboard.writeText(JSON.stringify(OB.snippets[client],null,2));

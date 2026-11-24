@@ -35,8 +35,9 @@ see the [MCP agent guide](docs/mcp.md) and [history playbook](docs/mcp-history.m
   unless the change explicitly requires a documented migration. Agents should
   use the available MCP tools for diagnostics, not bypass client limits using
   the internal HTTP bridge or database.
-- Keep Copilot CLI's `obdtrace-auto` profile limited to diagnostics and history
-  reads. Do not weaken the code-clearing safeguards or turn on live actions
+- MCP is the only agent interface. Do not add client-specific profiles or
+  code that edits other applications' configuration files. Keep
+  `OBDTRACE_READ_ONLY=1` limited to diagnostics and history reads. Do not weaken the code-clearing safeguards or turn on live actions
   implicitly. Keep observations, missing data, and AI assessments distinct.
 - Use synthetic fixtures for tests and examples. Never commit or attach a real
   VIN, `vehicle.key`, diagnostics database, private logs, or credentials.

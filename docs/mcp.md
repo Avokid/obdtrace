@@ -3,8 +3,8 @@
 ## Start with the tools your client exposes
 
 Use the OBDTrace MCP tools directly, not shell commands, the app's internal
-bridge or SQL. The [Connect page](../README.md) sets up the client. The
-`obdtrace-auto` profile created for Copilot CLI is diagnostic and history only:
+bridge or SQL. The [Connect page](../README.md) shows the client configuration.
+A server started with `OBDTRACE_READ_ONLY=1` is diagnostic and history only:
 it does not expose connection management, sampling changes, exports, annotation
 writes or code clearing. Do not try to bypass a missing tool. Choose the intended
 server before making calls; a mock `target` or `demo_seed` data is simulated

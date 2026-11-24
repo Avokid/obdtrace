@@ -127,8 +127,17 @@ pub fn clear_enabled_for_mcp() -> bool {
     std::env::var("OBDTRACE_ENABLE_CLEAR").is_ok_and(|v| v == "1")
 }
 
+/// Tools exposed when the stdio server runs with OBDTRACE_READ_ONLY=1.
+pub(crate) const READ_ONLY_TOOLS: &[&str] = &[
+    "connection_status", "list_supported_sensors", "get_live_snapshot", "read_live_data",
+    "read_dtcs", "read_freeze_frame", "read_readiness", "read_vin", "list_vehicles",
+    "list_sessions", "get_session", "get_session_events", "query_session", "list_fault_annotations",
+    "list_recordings", "query_recording", "get_recording_summary", "compare_recordings",
+    "find_similar_conditions",
+];
+
 pub fn allowed_for_mcp(name: &str) -> bool {
-    std::env::var("OBDTRACE_READ_ONLY").as_deref() != Ok("1") || crate::web::COPILOT_TOOLS.contains(&name)
+    std::env::var("OBDTRACE_READ_ONLY").as_deref() != Ok("1") || READ_ONLY_TOOLS.contains(&name)
 }
 
 #[derive(Clone, Copy)]

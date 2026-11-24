@@ -16,13 +16,6 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 const INDEX: &str = include_str!("../assets/index.html");
-pub(crate) const COPILOT_TOOLS: &[&str] = &[
-    "connection_status", "list_supported_sensors", "get_live_snapshot", "read_live_data",
-    "read_dtcs", "read_freeze_frame", "read_readiness", "read_vin", "list_vehicles",
-    "list_sessions", "get_session", "get_session_events", "query_session", "list_fault_annotations",
-    "list_recordings", "query_recording", "get_recording_summary", "compare_recordings",
-    "find_similar_conditions",
-];
 
 #[derive(Clone)]
 struct App {
@@ -75,13 +68,6 @@ fn exe_path() -> String {
 }
 
 fn config_path(client: &str) -> Option<std::path::PathBuf> {
-    if client == "copilot-cli" {
-        return std::env::var_os("COPILOT_HOME")
-            .filter(|path| !path.is_empty())
-            .map(std::path::PathBuf::from)
-            .or_else(|| dirs_home().map(|home| home.join(".copilot")))
-            .map(|dir| dir.join("mcp-config.json"));
-    }
     let home = dirs_home()?;
     match client {
         "claude-desktop" => {
@@ -123,12 +109,6 @@ fn snippet(client: &str, port: u16) -> Value {
         "vscode" => {
             entry["type"] = json!("stdio");
             json!({"servers": {"obdtrace": entry}})
-        }
-        "copilot-cli" => {
-            entry["type"] = json!("local");
-            entry["tools"] = json!(COPILOT_TOOLS);
-            entry["env"]["OBDTRACE_READ_ONLY"] = json!("1");
-            json!({"mcpServers": {"obdtrace-auto": entry}})
         }
         _ => json!({"mcpServers": {"obdtrace": entry}}),
     }
@@ -194,7 +174,6 @@ async fn onboarding(State(a): State<App>) -> Json<Value> {
         "snippets": {
             "claude-desktop": snippet("claude-desktop", a.port),
             "vscode": snippet("vscode", a.port),
-            "copilot-cli": snippet("copilot-cli", a.port),
         },
         "cli": {
             "claude-code": claude_code_command(a.port),
@@ -202,63 +181,8 @@ async fn onboarding(State(a): State<App>) -> Json<Value> {
         "config_paths": {
             "claude-desktop": config_path("claude-desktop").map(|p| p.to_string_lossy().to_string()),
             "vscode": config_path("vscode").map(|p| p.to_string_lossy().to_string()),
-            "copilot-cli": config_path("copilot-cli").map(|p| p.to_string_lossy().to_string()),
         }
     }))
-}
-
-async fn write_config(State(a): State<App>, headers: HeaderMap, Json(v): Json<Value>) -> Json<Value> {
-    let client = v["client"].as_str().unwrap_or("");
-    let Some(path) = config_path(client) else {
-        return Json(json!({"ok": false, "error": "unknown client"}));
-    };
-    if client == "copilot-cli" {
-        if !headers.contains_key(header::ORIGIN) {
-            return Json(json!({"ok": false, "error": "Copilot CLI setup must be requested from the local browser UI"}));
-        }
-        let status = a.hub.status();
-        let active = status["adapter"]["connected"] == true || status["adapter"]["connecting"] == true;
-        if active && status["target"].as_str().is_some_and(|target| target.split(':').next() == Some("mock")) {
-            return Json(json!({"ok": false, "error": "Disconnect the demo adapter before setting up Copilot CLI for a real car"}));
-        }
-    }
-    match write_client_config(&path, client, a.port) {
-        Ok(()) => Json(json!({"ok": true, "path": path.to_string_lossy()})),
-        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
-    }
-}
-
-fn write_client_config(path: &std::path::Path, client: &str, port: u16) -> Result<()> {
-    let mut doc = read_config(path)?;
-    let key = if client == "vscode" { "servers" } else { "mcpServers" };
-    let name = if client == "copilot-cli" { "obdtrace-auto" } else { "obdtrace" };
-    let entry = snippet(client, port)[key][name].clone();
-    let root = doc.as_object_mut().ok_or_else(|| anyhow::anyhow!("existing config is not a JSON object; not touched"))?;
-    let servers = root.entry(key).or_insert_with(|| json!({})).as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("existing {key} value is not a JSON object; not touched"))?;
-    if servers.get(name) == Some(&entry) {
-        return Ok(());
-    }
-    servers.insert(name.into(), entry);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    match std::fs::copy(path, path.with_extension("json.bak")) {
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
-    }
-    std::fs::write(path, serde_json::to_string_pretty(&doc)?)?;
-    Ok(())
-}
-
-fn read_config(path: &std::path::Path) -> Result<Value> {
-    match std::fs::read_to_string(path) {
-        Ok(s) if s.trim().is_empty() => Ok(json!({})),
-        Ok(s) => serde_json::from_str(&s).map_err(|e| anyhow::anyhow!("existing config is not valid JSON ({e}); not touched")),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
-        Err(e) => Err(e.into()),
-    }
 }
 
 async fn ws(State(a): State<App>, up: WebSocketUpgrade) -> Response {
@@ -292,7 +216,6 @@ fn router(hub: Arc<Hub>, port: u16, browser: String) -> Router {
         .route("/api/prompt/{name}",post(render_prompt))
         .route("/api/onboarding", get(onboarding))
         .route("/api/tool/{name}", post(tool))
-        .route("/api/write-config", post(write_config))
         .route("/ws", get(ws))
         .layer(middleware::from_fn_with_state(app.clone(), guard))
         .with_state(app)
@@ -323,55 +246,10 @@ mod tests {
     }
 
     #[test]
-    fn config_read_errors_are_not_treated_as_missing() {
-        let path = std::env::temp_dir().join(format!("obdtrace-invalid-{}.json", uuid::Uuid::new_v4()));
-        std::fs::write(&path, [0xff, 0xfe]).unwrap();
-        assert!(read_config(&path).is_err());
-        assert_eq!(std::fs::read(&path).unwrap(), [0xff, 0xfe]);
-        assert_eq!(read_config(&path.with_extension("missing")).unwrap(), json!({}));
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
     fn client_setup_uses_the_running_apps_port() {
         let port = 18888;
         assert_eq!(snippet("vscode", port)["servers"]["obdtrace"]["env"]["OBDTRACE_PORT"], "18888");
         assert_eq!(snippet("claude-desktop", port)["mcpServers"]["obdtrace"]["env"]["OBDTRACE_PORT"], "18888");
         assert!(claude_code_command(port).contains("--env OBDTRACE_PORT=18888 obdtrace --"));
-    }
-
-    #[test]
-    fn copilot_config_adds_only_read_access_and_preserves_existing_servers() {
-        let path = std::env::temp_dir().join(format!("obdtrace-copilot-{}.json", uuid::Uuid::new_v4()));
-        let previous = json!({"mcpServers": {"obd2-demo": {"command": "demo"}, "other": {"command": "other"}}, "extra": true});
-        std::fs::write(&path, previous.to_string()).unwrap();
-
-        write_client_config(&path, "copilot-cli", 18888).unwrap();
-        let actual = read_config(&path).unwrap();
-        let mut expected = previous.clone();
-        expected["mcpServers"]["obdtrace-auto"] = snippet("copilot-cli", 18888)["mcpServers"]["obdtrace-auto"].clone();
-        assert_eq!(actual, expected);
-        let server = &actual["mcpServers"]["obdtrace-auto"];
-        assert_eq!(server["env"]["OBDTRACE_PORT"], "18888");
-        assert_eq!(server["env"]["OBDTRACE_READ_ONLY"], "1");
-        let names = server["tools"].as_array().unwrap();
-        for required in ["connection_status", "read_dtcs", "query_session"] {
-            assert!(names.contains(&json!(required)));
-        }
-        for mutating in ["*", "connect", "clear_dtcs", "start_recording", "add_fault_annotation"] {
-            assert!(!names.contains(&json!(mutating)));
-        }
-        let definitions = tools::definitions();
-        assert!(names.iter().all(|name| definitions.iter().any(|tool| &tool["name"] == name)));
-
-        let backup = path.with_extension("json.bak");
-        write_client_config(&path, "copilot-cli", 18888).unwrap();
-        assert_eq!(read_config(&backup).unwrap(), previous);
-        std::fs::write(&path, r#"{"mcpServers":[]}"#).unwrap();
-        assert!(write_client_config(&path, "copilot-cli", 18888).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"mcpServers":[]}"#);
-
-        std::fs::remove_file(path).unwrap();
-        std::fs::remove_file(backup).unwrap();
     }
 }

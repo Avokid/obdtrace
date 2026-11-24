@@ -42,8 +42,8 @@ disable security controls to run a release your system does not trust.
 Try `obdtrace demo` first (`./obdtrace` in a Unix shell or `.\obdtrace.exe`
 in PowerShell when using the extracted folder). Then stop the demo and use
 `obdtrace app` for a real connection. On **Connect → Set up AI assistant**,
-choose your client and follow the instructions. Copilot CLI and VS Code use
-different configuration files. Confirm the setup by calling MCP
+choose your client and copy the shown snippet into its MCP configuration;
+OBDTrace does not edit client files itself. Confirm the setup by calling MCP
 `connection_status`. For manual configuration the command is the absolute
 path to the executable with one argument, `mcp`. `obdtrace-demo` is a
 suggested profile name for a separate, manually configured demo instance;
@@ -70,8 +70,8 @@ are not automatically migrated or recognized. The default port remains 8765.
    you verify that history and vehicle profiles are present.
 3. Replace any needed `OBD2MCP_` environment variable prefixes with
    `OBDTRACE_`. Update the MCP command path to the new executable and rename
-   the entry to `obdtrace-auto` (Copilot CLI) or `obdtrace` (other clients).
-   Alternatively, create a new entry from the Connect page and remove
+   the entry to `obdtrace`. Alternatively, copy a new entry from the Connect
+   page and remove
    the obsolete entry yourself. Do not reuse the previous server process.
 4. Open OBDTrace, verify Session history, and test `connection_status`.
    Do not attach the database, vehicle key, or private logs to a public issue.

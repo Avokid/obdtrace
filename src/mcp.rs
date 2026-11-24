@@ -32,7 +32,7 @@ Freeze frames are historical ECU data, may be partial, and do not establish faul
 
 History is saved automatically; no start_recording call is needed. When asked to save measurements, check session_id and storage_error, then verify the requested PIDs and interval with query_session before saying they were saved. \
 start_recording and stop_recording only mark a named interval. If exposed and requested, use save_diagnostic_log for a recent local bundle, export_recording for a whole-session sample CSV, or save_fault_annotation for a proposal with evidence. \
-The default Copilot CLI profile does not expose these write operations. For details, read the MCP resource obd://history-guide if the client supports resources.
+A server started with OBDTRACE_READ_ONLY=1 does not expose these write operations. For details, read the MCP resource obd://history-guide if the client supports resources.
 
 For archive analysis, use list_vehicles, list_sessions and get_session to select the right session and check sample_coverage. Use vehicle_id rather than masked VIN. \
 Use query_session for samples and get_session_events for context; keep PID/time ranges narrow, use UTC epoch milliseconds, and follow returned cursors with the same filters. query_session returns per-PID series with points [dt_ms, value] relative to t0_ms; for long ranges scan first with bucket_ms (points [dt_ms, n, min, avg, max]) and then read raw points for short windows. \

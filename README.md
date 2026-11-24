@@ -9,8 +9,9 @@ past recordings and compare behaviour before and after a repair.
 - **Data logger:** continuous recording of live PIDs, DTC events and adapter
   state into a local SQLite history, browsable in the app and exportable.
 - **Agent-ready:** an MCP server with diagnostic and history tools (compact
-  JSON time series, bucketed summaries, similar-condition search). Copilot CLI
-  gets a read-only profile; clearing codes needs explicit confirmation.
+  JSON time series, bucketed summaries, similar-condition search). MCP is the
+  only agent interface; `OBDTRACE_READ_ONLY=1` limits a server to reads, and
+  clearing codes needs explicit opt-in and human confirmation.
 - **Local first:** one Rust binary with a browser UI. It works without an AI
   client and makes no AI-service or cloud calls itself. MIT licensed.
 
@@ -46,13 +47,13 @@ share one adapter owner. Set `OBDTRACE_PORT` if needed.
 
 ## Connect an MCP client
 
-On the **Connect** page, open **Set up AI assistant**. Choose your client and
-whether OBDTrace is already configured to see the relevant setup or test steps.
-For GitHub Copilot CLI, **Enable Copilot CLI** adds the read-only `obdtrace-auto`
-server without changing other servers. In an open Copilot CLI session, run
-`/mcp reload` and ask Copilot to call `connection_status` from `obdtrace-auto`.
-Select **VS Code / GitHub Copilot** for the separate editor setup. For manual
-stdio setup, use the absolute path to the executable with `mcp` as its argument.
+OBDTrace is an ordinary stdio MCP server: any MCP client can start it with the
+absolute path to the executable and the single argument `mcp`. On the
+**Connect** page, **Set up AI assistant** shows a ready configuration snippet
+(VS Code, Claude Desktop) or command (Claude Code) to copy into your client.
+OBDTrace never edits another application's configuration. Add
+`"OBDTRACE_READ_ONLY": "1"` to the server's `env` to expose only diagnostic and
+history reads. Test the setup by asking the agent to call `connection_status`.
 
 ## Adapter connection targets
 

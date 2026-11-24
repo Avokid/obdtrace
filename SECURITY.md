@@ -15,9 +15,10 @@ Windows, use your private user profile with its normal restrictive ACL).
 Administrator access, malware running as your user, browser extensions and
 disclosure of the private launch file are outside this protection.
 
-New Copilot CLI configurations enforce read-only tools in the stdio server as
-well as the client. Re-run Connect setup and reload the client to upgrade old
-configurations. MCP code clearing requires opt-in on both the adapter owner and
+OBDTrace does not write MCP client configurations; you add the server to your
+client yourself. Set `OBDTRACE_READ_ONLY=1` in the server environment to expose
+only diagnostic and history reads, enforced by the stdio server regardless of
+client settings. MCP code clearing requires opt-in on both the adapter owner and
 the calling stdio process, a human confirmation and the same active session.
 
 ## Reporting a vulnerability

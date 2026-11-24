@@ -11,8 +11,8 @@
 | Export a whole session | `export_recording({"recording_id":42})` writes sample rows to a local CSV and returns `file` and `rows`. `recording_id` is the session ID. This is not a DTC timeline or a complete database backup. |
 | Save the agent's interpretation | `save_fault_annotation` stores a local proposal linked to original session evidence. It does not modify measurements or ECU state. |
 
-Use only operations exposed by your MCP client. The default Copilot CLI
-`obdtrace-auto` profile supports diagnostic and history reads, not sampling changes,
+Use only operations exposed by your MCP client. A server started with
+`OBDTRACE_READ_ONLY=1` supports diagnostic and history reads, not sampling changes,
 named investigations, exports or annotation writes. Automatic recording still
 works. If the requested operation is unavailable, state that explicitly; do
 not emulate it with shell commands, SQL or internal HTTP. Export paths refer
