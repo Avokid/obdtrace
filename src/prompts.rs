@@ -27,12 +27,12 @@ macro_rules! history {
         fn history_text(id: &str, language: &str) -> Option<&'static str> {
             match id {
                 $($id => Some(match language {
-                    "fi" => include_str!(concat!("../docs/prompts/", $id, ".fi.md")),
-                    "es" => include_str!(concat!("../docs/prompts/", $id, ".es.md")),
-                    "de" => include_str!(concat!("../docs/prompts/", $id, ".de.md")),
-                    "fr" => include_str!(concat!("../docs/prompts/", $id, ".fr.md")),
-                    "pt-BR" => include_str!(concat!("../docs/prompts/", $id, ".pt-BR.md")),
-                    _ => include_str!(concat!("../docs/prompts/", $id, ".en.md")),
+                    "fi" => include_str!(concat!("../assets/prompts/", $id, ".fi.md")),
+                    "es" => include_str!(concat!("../assets/prompts/", $id, ".es.md")),
+                    "de" => include_str!(concat!("../assets/prompts/", $id, ".de.md")),
+                    "fr" => include_str!(concat!("../assets/prompts/", $id, ".fr.md")),
+                    "pt-BR" => include_str!(concat!("../assets/prompts/", $id, ".pt-BR.md")),
+                    _ => include_str!(concat!("../assets/prompts/", $id, ".en.md")),
                 }),)+
                 _ => None,
             }

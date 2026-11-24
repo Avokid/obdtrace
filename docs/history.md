@@ -12,10 +12,6 @@ queries. Your external MCP client (Claude, Copilot, etc.) chooses what to invest
 interprets the evidence and can explicitly save its assessment back to the app.
 Nothing in the UI invokes a model automatically.
 
-Suomeksi: sovellus tallentaa ja hakee datan. MCP:tä kutsuva ulkoinen malli tekee
-päätelmät. UI:n kehotteet kopioidaan omaan AI-keskusteluun; sovellus ei lähetä niitä
-AI-palveluun.
-
 ## Automatic history
 
 Every successful connection starts a persistent SQLite session, even without an AI
@@ -153,13 +149,15 @@ arrived observations rather than treating an earlier page as the final record.
 
 ## Documented prompts in the UI and MCP
 
-These are shared source documents, embedded in the binary at build time:
+These templates are embedded in the binary at build time. The English sources
+are linked below; translations for the other UI languages live next to them in
+[`assets/prompts`](../assets/prompts).
 
-| Workflow | English | Suomi | Español | Deutsch | Français | Português (Brasil) |
-| --- | --- | --- | --- | --- | --- | --- |
-| Identify a symptom | [en](prompts/identify_symptom.en.md) | [fi](prompts/identify_symptom.fi.md) | [es](prompts/identify_symptom.es.md) | [de](prompts/identify_symptom.de.md) | [fr](prompts/identify_symptom.fr.md) | [pt-BR](prompts/identify_symptom.pt-BR.md) |
-| Describe earlier conditions | [en](prompts/explain_previous_fault.en.md) | [fi](prompts/explain_previous_fault.fi.md) | [es](prompts/explain_previous_fault.es.md) | [de](prompts/explain_previous_fault.de.md) | [fr](prompts/explain_previous_fault.fr.md) | [pt-BR](prompts/explain_previous_fault.pt-BR.md) |
-| Compare after clearing | [en](prompts/compare_after_clear.en.md) | [fi](prompts/compare_after_clear.fi.md) | [es](prompts/compare_after_clear.es.md) | [de](prompts/compare_after_clear.de.md) | [fr](prompts/compare_after_clear.fr.md) | [pt-BR](prompts/compare_after_clear.pt-BR.md) |
+| Workflow | Template |
+| --- | --- |
+| Identify a symptom | [identify_symptom.en.md](../assets/prompts/identify_symptom.en.md) |
+| Describe earlier conditions | [explain_previous_fault.en.md](../assets/prompts/explain_previous_fault.en.md) |
+| Compare after clearing | [compare_after_clear.en.md](../assets/prompts/compare_after_clear.en.md) |
 
 Open a history session, choose the time range and optionally an event/assessment,
 preview a prompt, then copy it to your external AI client. Only local IDs and time

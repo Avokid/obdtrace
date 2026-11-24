@@ -66,13 +66,9 @@ default; the language selector remembers your choice. Translations and the
 i18next browser runtime (MIT, pinned at 27.2.6) are embedded in the binary, so
 no network or Node.js runtime is needed. Edit the catalogs in
 [`assets/locales`](assets/locales) and the long history prompts in
-[`docs/prompts`](docs/prompts).
+[`assets/prompts`](assets/prompts).
 
 **[MCP agent guide](docs/mcp.md)** · **[Session history and privacy](docs/history.md)** · **[History and saving playbook](docs/mcp-history.md)**
-
-Suomeksi: jokainen käyttökerta tallentuu automaattisesti. Vikakoodien nollaus ei
-poista historiaa. Sovellus tarjoaa datan ja kehotepohjat; ulkoinen MCP:tä kutsuva
-AI tunnistaa oireet ja tekee vertailupäätelmät.
 
 VINs are masked in public outputs. Keep the local database and `vehicle.key`
 private. No automatic history deletion or telemetry. Generic OBD-II is not a

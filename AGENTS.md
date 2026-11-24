@@ -6,10 +6,10 @@ see the [MCP agent guide](docs/mcp.md) and [history playbook](docs/mcp-history.m
 
 ## Contribution workflow
 
-- Use English for source comments, commit messages, pull requests, and primary
-  documentation. Keep user-facing translations in `assets/locales/` and
-  localized history prompts in `docs/prompts/` in sync when changing shared
-  wording, keys, or placeholders.
+- Use English for source comments, commit messages, pull requests, and all
+  documentation (README, `docs/`, policies). Keep user-facing translations in
+  `assets/locales/` and localized history prompts in `assets/prompts/` in sync
+  when changing shared wording, keys, or placeholders.
 - Start from the issue or agreed scope. Inspect the existing code and tests
   before editing. Keep diffs focused, preserve unrelated work, and use small
   commits that explain why the change was made.
