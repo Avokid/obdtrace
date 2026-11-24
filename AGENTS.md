@@ -47,7 +47,8 @@ see the [MCP agent guide](docs/mcp.md) and [history playbook](docs/mcp-history.m
 
 ## Verify changes
 
-Follow the [build prerequisites](README.md#build-from-source). Run a focused
+Follow the [build prerequisites](README.md#build-from-source). Format Rust code
+with `cargo fmt` (CI runs `cargo fmt --check`). Run a focused
 Rust test for behavioral changes, and use `cargo test --locked` before handing
 off changes that touch multiple components. For MCP or UI changes, exercise
 the affected flow with `obdtrace doctor` or `obdtrace demo --no-browser` as

@@ -65,7 +65,12 @@ pub struct Timings {
 
 impl Default for Timings {
     fn default() -> Self {
-        Self { atz: Duration::from_secs(4), normal: Duration::from_millis(2500), probe: Duration::from_secs(12), fallback_probe: Duration::from_secs(6) }
+        Self {
+            atz: Duration::from_secs(4),
+            normal: Duration::from_millis(2500),
+            probe: Duration::from_secs(12),
+            fallback_probe: Duration::from_secs(6),
+        }
     }
 }
 
@@ -95,7 +100,10 @@ pub struct Elm {
 }
 
 fn strip_ws(s: &str) -> String {
-    s.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_uppercase()
+    s.chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_uppercase()
 }
 
 fn classify(line: &str) -> Option<ElmError> {
@@ -104,7 +112,9 @@ fn classify(line: &str) -> Option<ElmError> {
     Some(match u {
         "NO DATA" => ElmError::NoData,
         "UNABLE TO CONNECT" => ElmError::UnableToConnect,
-        "BUS INIT: ...ERROR" | "BUS INIT:...ERROR" | "BUS ERROR" | "BUS BUSY" | "FB ERROR" => ElmError::BusInit,
+        "BUS INIT: ...ERROR" | "BUS INIT:...ERROR" | "BUS ERROR" | "BUS BUSY" | "FB ERROR" => {
+            ElmError::BusInit
+        }
         "CAN ERROR" => ElmError::CanError,
         "DATA ERROR" | "LV RESET" => ElmError::DataError,
         "BUFFER FULL" => ElmError::BufferFull,
@@ -117,7 +127,14 @@ fn classify(line: &str) -> Option<ElmError> {
 
 impl Elm {
     pub fn new(t: Box<dyn Transport>) -> Self {
-        Self { t, timings: Timings::default(), unsupported: HashSet::new(), dead_pids: HashSet::new(), raw: Vec::new(), dtc_count_prefix: false }
+        Self {
+            t,
+            timings: Timings::default(),
+            unsupported: HashSet::new(),
+            dead_pids: HashSet::new(),
+            raw: Vec::new(),
+            dtc_count_prefix: false,
+        }
     }
 
     pub fn describe(&self) -> String {
@@ -137,7 +154,10 @@ impl Elm {
     pub async fn command(&mut self, cmd: &str, timeout: Duration) -> Result<Vec<String>, ElmError> {
         while let Ok(Some(_)) = self.t.read_chunk(Duration::from_millis(1)).await {}
         let line = format!("{cmd}\r");
-        self.t.write(line.as_bytes()).await.map_err(|e| ElmError::Disconnected(e.to_string()))?;
+        self.t
+            .write(line.as_bytes())
+            .await
+            .map_err(|e| ElmError::Disconnected(e.to_string()))?;
         let deadline = Instant::now() + timeout;
         let mut buf: Vec<u8> = Vec::new();
         loop {
@@ -146,9 +166,16 @@ impl Elm {
                 self.log_raw(cmd, &String::from_utf8_lossy(&buf));
                 return Err(ElmError::Timeout);
             }
-            match self.t.read_chunk(left.min(Duration::from_millis(500))).await {
+            match self
+                .t
+                .read_chunk(left.min(Duration::from_millis(500)))
+                .await
+            {
                 Ok(Some(c)) => {
-                    buf.extend(c.into_iter().filter(|b| *b == b'\r' || *b == b'\n' || (0x20..0x7f).contains(b)));
+                    buf.extend(
+                        c.into_iter()
+                            .filter(|b| *b == b'\r' || *b == b'\n' || (0x20..0x7f).contains(b)),
+                    );
                     if buf.contains(&b'>') {
                         break;
                     }
@@ -181,7 +208,11 @@ impl Elm {
 
     fn log_raw(&mut self, cmd: &str, resp: &str) {
         let resp = redact_reply(cmd, &resp.replace('\r', " | "));
-        self.raw.push(RawEntry { t_ms: crate::store::now_ms(), cmd: cmd.to_string(), resp });
+        self.raw.push(RawEntry {
+            t_ms: crate::store::now_ms(),
+            cmd: cmd.to_string(),
+            resp,
+        });
         if self.raw.len() > 4000 {
             self.raw.drain(..2000);
         }
@@ -207,12 +238,20 @@ impl Elm {
         for attempt in 0..3 {
             match self.command("ATZ", self.timings.atz * (attempt + 1)).await {
                 Ok(lines) => {
-                    version = lines.iter().find(|l| l.to_uppercase().contains("ELM") || l.to_uppercase().contains("OBD")).cloned().or_else(|| lines.first().cloned());
+                    version = lines
+                        .iter()
+                        .find(|l| {
+                            l.to_uppercase().contains("ELM") || l.to_uppercase().contains("OBD")
+                        })
+                        .cloned()
+                        .or_else(|| lines.first().cloned());
                     break;
                 }
                 Err(e @ ElmError::Disconnected(_)) => return Err(e),
                 Err(_) => {
-                    report.notes.push("adapter was slow to answer ATZ, retrying".into());
+                    report
+                        .notes
+                        .push("adapter was slow to answer ATZ, retrying".into());
                     let _ = self.t.write(b"\r").await;
                 }
             }
@@ -226,14 +265,22 @@ impl Elm {
         match self.query_raw("0100", self.timings.probe).await {
             Ok(_) => connected = true,
             Err(e @ ElmError::Disconnected(_)) => return Err(e),
-            Err(_) => report.notes.push("automatic protocol search failed, trying protocols one by one".into()),
+            Err(_) => report
+                .notes
+                .push("automatic protocol search failed, trying protocols one by one".into()),
         }
         if !connected {
-            for sp in ["ATSP6", "ATSP7", "ATSP8", "ATSP9", "ATSP5", "ATSP4", "ATSP3", "ATSP2", "ATSP1"] {
+            for sp in [
+                "ATSP6", "ATSP7", "ATSP8", "ATSP9", "ATSP5", "ATSP4", "ATSP3", "ATSP2", "ATSP1",
+            ] {
                 if self.command(sp, self.timings.normal).await.is_err() {
                     continue;
                 }
-                if self.query_raw("0100", self.timings.fallback_probe).await.is_ok() {
+                if self
+                    .query_raw("0100", self.timings.fallback_probe)
+                    .await
+                    .is_ok()
+                {
                     connected = true;
                     break;
                 }
@@ -244,19 +291,40 @@ impl Elm {
         }
         report.protocol = self.protocol().await;
         self.dtc_count_prefix = report.protocol.contains("CAN");
-        report.voltage = self.command("ATRV", self.timings.normal).await.ok().and_then(|l| l.first().cloned());
+        report.voltage = self
+            .command("ATRV", self.timings.normal)
+            .await
+            .ok()
+            .and_then(|l| l.first().cloned());
         report.unsupported_commands = self.unsupported.iter().cloned().collect();
         report.unsupported_commands.sort();
         Ok(report)
     }
 
     async fn protocol(&mut self) -> String {
-        let names = ["", "SAE J1850 PWM", "SAE J1850 VPW", "ISO 9141-2", "ISO 14230-4 KWP (5 baud)", "ISO 14230-4 KWP (fast)", "ISO 15765-4 CAN (11 bit, 500 kbaud)", "ISO 15765-4 CAN (29 bit, 500 kbaud)", "ISO 15765-4 CAN (11 bit, 250 kbaud)", "ISO 15765-4 CAN (29 bit, 250 kbaud)", "SAE J1939 CAN"];
+        let names = [
+            "",
+            "SAE J1850 PWM",
+            "SAE J1850 VPW",
+            "ISO 9141-2",
+            "ISO 14230-4 KWP (5 baud)",
+            "ISO 14230-4 KWP (fast)",
+            "ISO 15765-4 CAN (11 bit, 500 kbaud)",
+            "ISO 15765-4 CAN (29 bit, 500 kbaud)",
+            "ISO 15765-4 CAN (11 bit, 250 kbaud)",
+            "ISO 15765-4 CAN (29 bit, 250 kbaud)",
+            "SAE J1939 CAN",
+        ];
         match self.command("ATDPN", self.timings.normal).await {
             Ok(l) => {
                 let s = l.first().cloned().unwrap_or_default();
                 let n = s.trim_start_matches('A');
-                n.chars().next().and_then(|c| c.to_digit(16)).and_then(|d| names.get(d as usize)).map(|n| n.to_string()).unwrap_or(s)
+                n.chars()
+                    .next()
+                    .and_then(|c| c.to_digit(16))
+                    .and_then(|d| names.get(d as usize))
+                    .map(|n| n.to_string())
+                    .unwrap_or(s)
             }
             Err(_) => match self.command("ATDP", self.timings.normal).await {
                 Ok(l) => l.first().cloned().unwrap_or_else(|| "unknown".into()),
@@ -266,10 +334,20 @@ impl Elm {
     }
 
     /// Run an OBD request and return the unique reply frames (starting with the response mode byte).
-    pub async fn query_raw(&mut self, req: &str, timeout: Duration) -> Result<Vec<Vec<u8>>, ElmError> {
+    pub async fn query_raw(
+        &mut self,
+        req: &str,
+        timeout: Duration,
+    ) -> Result<Vec<Vec<u8>>, ElmError> {
         let lines = self.command(req, timeout).await?;
-        let want = u8::from_str_radix(&strip_ws(req)[..2], 16).map_err(|_| ElmError::Malformed(req.into()))? + 0x40;
-        let want_pid = if matches!(want, 0x41 | 0x42 | 0x49) { u8::from_str_radix(&strip_ws(req)[2..4], 16).ok() } else { None };
+        let want = u8::from_str_radix(&strip_ws(req)[..2], 16)
+            .map_err(|_| ElmError::Malformed(req.into()))?
+            + 0x40;
+        let want_pid = if matches!(want, 0x41 | 0x42 | 0x49) {
+            u8::from_str_radix(&strip_ws(req)[2..4], 16).ok()
+        } else {
+            None
+        };
         let frames = assemble_frames(&lines);
         let mut good: Vec<Vec<u8>> = Vec::new();
         for f in &frames {
@@ -293,7 +371,8 @@ impl Elm {
 
     pub async fn read_pid(&mut self, def: &PidDef) -> Result<f64, ElmError> {
         let frames = self.query(&format!("01{:02X}", def.pid)).await?;
-        obd::decode_pid(def, &frames[0][2..]).ok_or_else(|| ElmError::Malformed(format!("short reply for {}", def.name)))
+        obd::decode_pid(def, &frames[0][2..])
+            .ok_or_else(|| ElmError::Malformed(format!("short reply for {}", def.name)))
     }
 
     pub async fn read_dtcs(&mut self, mode: u8) -> Result<Vec<String>, ElmError> {
@@ -317,24 +396,45 @@ impl Elm {
         let frames = self.query("0902").await?;
         let mut sorted = frames.clone();
         sorted.sort_by_key(|f| f.get(2).copied().unwrap_or(0));
-        let bytes: Vec<u8> = if sorted.len() == 1 { sorted[0][3.min(sorted[0].len())..].to_vec() } else { sorted.iter().flat_map(|f| f[3.min(f.len())..].to_vec()).collect() };
-        let vin: String = bytes.into_iter().filter(|b| b.is_ascii_alphanumeric()).map(|b| b as char).collect();
-        let vin = if vin.len() > 17 { vin[..17].to_string() } else { vin };
+        let bytes: Vec<u8> = if sorted.len() == 1 {
+            sorted[0][3.min(sorted[0].len())..].to_vec()
+        } else {
+            sorted
+                .iter()
+                .flat_map(|f| f[3.min(f.len())..].to_vec())
+                .collect()
+        };
+        let vin: String = bytes
+            .into_iter()
+            .filter(|b| b.is_ascii_alphanumeric())
+            .map(|b| b as char)
+            .collect();
+        let vin = if vin.len() > 17 {
+            vin[..17].to_string()
+        } else {
+            vin
+        };
         if redact::is_plausible_vin(&vin) {
             Ok(vin)
         } else {
-            Err(ElmError::Malformed("VIN reply did not contain a valid 17-character VIN".into()))
+            Err(ElmError::Malformed(
+                "VIN reply did not contain a valid 17-character VIN".into(),
+            ))
         }
     }
 
     pub async fn read_readiness(&mut self) -> Result<obd::Readiness, ElmError> {
         let frames = self.query("0101").await?;
-        obd::decode_readiness(&frames[0][2..]).ok_or_else(|| ElmError::Malformed("short readiness reply".into()))
+        obd::decode_readiness(&frames[0][2..])
+            .ok_or_else(|| ElmError::Malformed("short readiness reply".into()))
     }
 
     pub async fn freeze_frame_dtc(&mut self) -> Result<Option<String>, ElmError> {
         match self.query("020200").await {
-            Ok(f) => Ok(f[0].get(3..5).filter(|d| d[0] != 0 || d[1] != 0).map(|d| obd::decode_dtc(d[0], d[1]))),
+            Ok(f) => Ok(f[0]
+                .get(3..5)
+                .filter(|d| d[0] != 0 || d[1] != 0)
+                .map(|d| obd::decode_dtc(d[0], d[1]))),
             Err(ElmError::NoData) => Ok(None),
             Err(e) => Err(e),
         }
@@ -342,7 +442,9 @@ impl Elm {
 
     pub async fn freeze_frame_pid(&mut self, def: &PidDef) -> Result<f64, ElmError> {
         let f = self.query(&format!("02{:02X}00", def.pid)).await?;
-        obd::decode_pid(def, f[0].get(3..).unwrap_or(&[])).ok_or_else(|| ElmError::Malformed(format!("short freeze-frame reply for {}", def.name)))
+        obd::decode_pid(def, f[0].get(3..).unwrap_or(&[])).ok_or_else(|| {
+            ElmError::Malformed(format!("short freeze-frame reply for {}", def.name))
+        })
     }
 
     /// Discover supported Mode 01 PIDs, following continuation flags.
@@ -366,7 +468,10 @@ impl Elm {
     }
 
     pub async fn voltage(&mut self) -> Option<String> {
-        self.command("ATRV", self.timings.normal).await.ok().and_then(|l| l.first().cloned())
+        self.command("ATRV", self.timings.normal)
+            .await
+            .ok()
+            .and_then(|l| l.first().cloned())
     }
 }
 
@@ -396,7 +501,9 @@ fn hex_bytes(s: &str) -> Option<Vec<u8>> {
     if h.is_empty() || h.len() % 2 == 1 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
-    (0..h.len() / 2).map(|i| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).ok()).collect()
+    (0..h.len() / 2)
+        .map(|i| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).ok())
+        .collect()
 }
 
 /// Turn reply lines into data frames, handling ELM multi-line CAN replies
@@ -407,14 +514,20 @@ pub fn assemble_frames(lines: &[String]) -> Vec<Vec<u8>> {
     while i < lines.len() {
         let l = lines[i].trim();
         let compact = strip_ws(l);
-        let is_len = compact.len() == 3 && compact.chars().all(|c| c.is_ascii_hexdigit()) && !l.contains(' ');
+        let is_len = compact.len() == 3
+            && compact.chars().all(|c| c.is_ascii_hexdigit())
+            && !l.contains(' ');
         if is_len {
             let total = usize::from_str_radix(&compact, 16).unwrap_or(0);
             let mut parts: Vec<(usize, Vec<u8>)> = Vec::new();
             i += 1;
             while i < lines.len() {
-                let Some((n, rest)) = lines[i].split_once(':') else { break };
-                let Ok(idx) = usize::from_str_radix(n.trim(), 16) else { break };
+                let Some((n, rest)) = lines[i].split_once(':') else {
+                    break;
+                };
+                let Ok(idx) = usize::from_str_radix(n.trim(), 16) else {
+                    break;
+                };
                 if let Some(b) = hex_bytes(rest) {
                     parts.push((idx, b));
                 }
@@ -442,7 +555,12 @@ mod tests {
     fn elm(scenario: &str, quirks: &[&str]) -> Elm {
         let q: Vec<String> = quirks.iter().map(|s| s.to_string()).collect();
         let mut e = Elm::new(Box::new(MockTransport::new(scenario, &q).unwrap()));
-        e.timings = Timings { atz: Duration::from_millis(800), normal: Duration::from_millis(800), probe: Duration::from_secs(2), fallback_probe: Duration::from_secs(1) };
+        e.timings = Timings {
+            atz: Duration::from_millis(800),
+            normal: Duration::from_millis(800),
+            probe: Duration::from_secs(2),
+            fallback_probe: Duration::from_secs(1),
+        };
         e
     }
 
@@ -450,13 +568,28 @@ mod tests {
         let mut e = elm("catalyst", quirks);
         let report = e.init().await.expect("init");
         assert!(report.version.contains("ELM327"));
-        assert!(report.protocol.contains("CAN"), "protocol {}", report.protocol);
+        assert!(
+            report.protocol.contains("CAN"),
+            "protocol {}",
+            report.protocol
+        );
         let rpm = e.read_pid(obd::pid_by_name("rpm").unwrap()).await.unwrap();
         assert!((700.0..800.0).contains(&rpm), "rpm {rpm}");
         assert_eq!(e.read_dtcs(0x03).await.unwrap(), vec!["P0420"]);
-        assert_eq!(e.read_vin().await.unwrap(), crate::transport::mock::MOCK_VIN);
-        assert_eq!(e.freeze_frame_dtc().await.unwrap().as_deref(), Some("P0420"));
-        assert_eq!(e.freeze_frame_pid(obd::pid_by_name("speed").unwrap()).await.unwrap(), 98.0);
+        assert_eq!(
+            e.read_vin().await.unwrap(),
+            crate::transport::mock::MOCK_VIN
+        );
+        assert_eq!(
+            e.freeze_frame_dtc().await.unwrap().as_deref(),
+            Some("P0420")
+        );
+        assert_eq!(
+            e.freeze_frame_pid(obd::pid_by_name("speed").unwrap())
+                .await
+                .unwrap(),
+            98.0
+        );
         let sup = e.supported_pids().await.unwrap();
         assert!(sup.contains(&0x0C) && sup.contains(&0x42));
         e.clear_dtcs().await.unwrap();
@@ -495,7 +628,10 @@ mod tests {
         let mut e = elm("healthy", &["fake_support"]);
         e.init().await.unwrap();
         assert!(e.supported_pids().await.unwrap().contains(&0x5E));
-        assert_eq!(e.read_pid(obd::pid_by_name("fuel_rate").unwrap()).await, Err(ElmError::NoData));
+        assert_eq!(
+            e.read_pid(obd::pid_by_name("fuel_rate").unwrap()).await,
+            Err(ElmError::NoData)
+        );
     }
 
     #[tokio::test]
@@ -503,17 +639,32 @@ mod tests {
         let mut e = elm("catalyst", &[]);
         e.init().await.unwrap();
         e.read_vin().await.unwrap();
-        let all: String = e.take_raw().iter().map(|r| format!("{} {}", r.cmd, r.resp)).collect();
+        let all: String = e
+            .take_raw()
+            .iter()
+            .map(|r| format!("{} {}", r.cmd, r.resp))
+            .collect();
         assert!(!all.contains("9BA012345") && !all.contains("57 41 55"));
     }
 
     #[test]
     fn assembles_multiline_and_legacy_frames() {
-        let lines: Vec<String> = ["014", "0: 49 02 01 57 41 55", "1: 5A 5A 5A 38 4B 39 42", "2: 41 30 31 32 33 34 35"].iter().map(|s| s.to_string()).collect();
+        let lines: Vec<String> = [
+            "014",
+            "0: 49 02 01 57 41 55",
+            "1: 5A 5A 5A 38 4B 39 42",
+            "2: 41 30 31 32 33 34 35",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let f = assemble_frames(&lines);
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].len(), 20);
-        let legacy: Vec<String> = ["41 0C 1A F8", "41 0C 1A F8"].iter().map(|s| s.to_string()).collect();
+        let legacy: Vec<String> = ["41 0C 1A F8", "41 0C 1A F8"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(assemble_frames(&legacy).len(), 2);
     }
 

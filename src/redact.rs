@@ -13,7 +13,9 @@ pub fn mask_vin(vin: &str) -> String {
 }
 
 pub fn is_plausible_vin(s: &str) -> bool {
-    s.len() == 17 && s.chars().all(|c| c.is_ascii_alphanumeric() && !"IOQ".contains(c.to_ascii_uppercase()))
+    s.len() == 17
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() && !"IOQ".contains(c.to_ascii_uppercase()))
 }
 
 /// Scrub any VIN-looking token (17 chars, no I/O/Q, with a digit and a letter)
@@ -22,7 +24,11 @@ pub fn scrub_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut token = String::new();
     let flush = |token: &mut String, out: &mut String| {
-        if token.len() == 17 && is_plausible_vin(token) && token.chars().any(|c| c.is_ascii_digit()) && token.chars().any(|c| c.is_ascii_alphabetic()) {
+        if token.len() == 17
+            && is_plausible_vin(token)
+            && token.chars().any(|c| c.is_ascii_digit())
+            && token.chars().any(|c| c.is_ascii_alphabetic())
+        {
             out.push_str(&mask_vin(token));
         } else {
             out.push_str(token);

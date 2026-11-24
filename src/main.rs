@@ -1,12 +1,12 @@
-mod elm;
 mod bridge;
-mod hub;
+mod elm;
 mod history;
+mod hub;
 mod identity;
+mod locales;
 mod mcp;
 mod obd;
 mod prompts;
-mod locales;
 mod redact;
 mod store;
 mod tools;
@@ -18,7 +18,11 @@ use clap::{Parser, Subcommand};
 use std::io::IsTerminal;
 
 #[derive(Parser)]
-#[command(name = "obdtrace", version, about = "OBD-II MCP server for ELM327 adapters (BLE, serial, WiFi) with a local setup app")]
+#[command(
+    name = "obdtrace",
+    version,
+    about = "OBD-II MCP server for ELM327 adapters (BLE, serial, WiFi) with a local setup app"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
@@ -45,7 +49,10 @@ enum Cmd {
 }
 
 fn port() -> u16 {
-    std::env::var("OBDTRACE_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8765)
+    std::env::var("OBDTRACE_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8765)
 }
 
 fn open_browser(url: &std::path::Path) {
@@ -61,7 +68,7 @@ fn open_browser(url: &std::path::Path) {
     }
 }
 
-async fn run_app(no_browser: bool, demo:bool) -> Result<()> {
+async fn run_app(no_browser: bool, demo: bool) -> Result<()> {
     let p = port();
     bridge::prepare_dir()?;
     let url = bridge::launch_file(p);
@@ -72,15 +79,20 @@ async fn run_app(no_browser: bool, demo:bool) -> Result<()> {
         }
         return Ok(());
     }
-    let listener=web::bind(p).await?;
-    let hub=hub::Hub::open_default()?;
-    if demo {hub.connect("mock:audi_demo").await?;}
+    let listener = web::bind(p).await?;
+    let hub = hub::Hub::open_default()?;
+    if demo {
+        hub.connect("mock:audi_demo").await?;
+    }
     let owner = bridge::Owner::start(hub.clone(), p).await?;
-    eprintln!("OBDTrace: open {} in your browser (Ctrl+C to quit)", url.display());
+    eprintln!(
+        "OBDTrace: open {} in your browser (Ctrl+C to quit)",
+        url.display()
+    );
     if !no_browser {
         open_browser(&url);
     }
-    let result=tokio::select!{
+    let result = tokio::select! {
         result=web::serve_listener(listener,hub.clone(),p,owner.browser.clone())=>result,
         signal=tokio::signal::ctrl_c()=>signal.map_err(Into::into),
     };
@@ -107,28 +119,30 @@ async fn run_mcp() -> Result<()> {
     let owner = bridge::Owner::start(hub.clone(), p).await?;
     let browser = owner.browser.clone();
     let h = hub.clone();
-    let server=tokio::spawn(async move {
+    let server = tokio::spawn(async move {
         if let Err(e) = web::serve_listener(listener, h, p, browser).await {
             tracing::warn!("web UI not started: {e}");
         }
     });
-    let auto_connect=std::env::var("OBDTRACE_CONNECTION").ok().map(|target|{
-        let h=hub.clone();
+    let auto_connect = std::env::var("OBDTRACE_CONNECTION").ok().map(|target| {
+        let h = hub.clone();
         tokio::spawn(async move {
             if let Err(e) = h.connect(&target).await {
                 tracing::warn!("auto-connect failed: {e}");
             }
         })
     });
-    let result=tokio::select!{
+    let result = tokio::select! {
         result=mcp::run_stdio(mcp::Backend::Local(hub.clone()))=>result,
         signal=tokio::signal::ctrl_c()=>signal.map_err(Into::into),
     };
     server.abort();
-    if let Some(task)=auto_connect{
+    if let Some(task) = auto_connect {
         task.abort();
-        if let Err(e)=task.await{
-            if !e.is_cancelled(){tracing::error!("auto-connect task failed: {e}");}
+        if let Err(e) = task.await {
+            if !e.is_cancelled() {
+                tracing::error!("auto-connect task failed: {e}");
+            }
         }
     }
     hub.disconnect().await?;
@@ -137,11 +151,16 @@ async fn run_mcp() -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().with_writer(std::io::stderr).with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into())).init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
+        )
+        .init();
     let cli = Cli::parse();
     match cli.cmd {
         Some(Cmd::Mcp) => run_mcp().await,
-        Some(Cmd::App { no_browser }) => run_app(no_browser,false).await,
+        Some(Cmd::App { no_browser }) => run_app(no_browser, false).await,
         Some(Cmd::Demo { no_browser }) => run_app(no_browser, true).await,
         Some(Cmd::Scan) => {
             let (list, warnings) = transport::list_adapters(true).await;
@@ -162,9 +181,13 @@ async fn main() -> Result<()> {
                 all &= ok;
             }
             println!("binary: {}", std::env::current_exe()?.display());
-            if all { Ok(()) } else { std::process::exit(1) }
+            if all {
+                Ok(())
+            } else {
+                std::process::exit(1)
+            }
         }
-        None if std::io::stdin().is_terminal() => run_app(false,false).await,
+        None if std::io::stdin().is_terminal() => run_app(false, false).await,
         None => run_mcp().await,
     }
 }

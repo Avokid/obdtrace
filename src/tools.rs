@@ -30,8 +30,10 @@ pub fn definitions() -> Vec<Value> {
     let string = json!({"type": "string"});
     let session_id = json!({"type": "integer", "description": "Session ID from connection_status.session_id or list_sessions.sessions[].id."});
     let recording_id = json!({"type": "integer", "description": "Legacy name for session_id, not investigation_id."});
-    let from_ms = json!({"type": "integer", "description": "Inclusive lower UTC epoch millisecond bound."});
-    let to_ms = json!({"type": "integer", "description": "Inclusive upper UTC epoch millisecond bound."});
+    let from_ms =
+        json!({"type": "integer", "description": "Inclusive lower UTC epoch millisecond bound."});
+    let to_ms =
+        json!({"type": "integer", "description": "Inclusive upper UTC epoch millisecond bound."});
     let interval_ms = json!({"type": "integer", "minimum": 0, "description": "Background cycle interval in ms; capped at 60000. Actual cycles may take longer."});
     vec![
         tool("connection_status", "Start live diagnostics here. Check adapter.connected, target (mock means simulated), session_id and storage_error. last_dtc_scan is cached; its category timestamps describe when reads occurred, not when a fault began.", json!({}), &[]),
@@ -116,11 +118,20 @@ pub fn definitions() -> Vec<Value> {
 }
 
 fn names(args: &Value) -> Vec<String> {
-    args["pids"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    args["pids"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn id(args: &Value, key: &str) -> Result<i64> {
-    args[key].as_i64().ok_or_else(|| anyhow!("missing integer argument '{key}'"))
+    args[key]
+        .as_i64()
+        .ok_or_else(|| anyhow!("missing integer argument '{key}'"))
 }
 
 pub fn clear_enabled_for_mcp() -> bool {
@@ -129,10 +140,24 @@ pub fn clear_enabled_for_mcp() -> bool {
 
 /// Tools exposed when the stdio server runs with OBDTRACE_READ_ONLY=1.
 pub(crate) const READ_ONLY_TOOLS: &[&str] = &[
-    "connection_status", "list_supported_sensors", "get_live_snapshot", "read_live_data",
-    "read_dtcs", "read_freeze_frame", "read_readiness", "read_vin", "list_vehicles",
-    "list_sessions", "get_session", "get_session_events", "query_session", "list_fault_annotations",
-    "list_recordings", "query_recording", "get_recording_summary", "compare_recordings",
+    "connection_status",
+    "list_supported_sensors",
+    "get_live_snapshot",
+    "read_live_data",
+    "read_dtcs",
+    "read_freeze_frame",
+    "read_readiness",
+    "read_vin",
+    "list_vehicles",
+    "list_sessions",
+    "get_session",
+    "get_session_events",
+    "query_session",
+    "list_fault_annotations",
+    "list_recordings",
+    "query_recording",
+    "get_recording_summary",
+    "compare_recordings",
     "find_similar_conditions",
 ];
 
@@ -150,8 +175,14 @@ pub struct Ctx {
 }
 
 pub async fn call(hub: &Arc<Hub>, name: &str, args: Value, ctx: Ctx) -> Result<Value> {
-    let Ctx { origin, confirmed, mcp_clear_enabled } = ctx;
-    if origin == Origin::Mcp && !allowed_for_mcp(name) { bail!("tool disabled in this MCP profile"); }
+    let Ctx {
+        origin,
+        confirmed,
+        mcp_clear_enabled,
+    } = ctx;
+    if origin == Origin::Mcp && !allowed_for_mcp(name) {
+        bail!("tool disabled in this MCP profile");
+    }
     hub.note_tool(name, if origin == Origin::Mcp { "mcp" } else { "ui" });
     match name {
         "connection_status" => {
@@ -163,8 +194,17 @@ pub async fn call(hub: &Arc<Hub>, name: &str, args: Value, ctx: Ctx) -> Result<V
             }
             Ok(s)
         }
-        "list_adapters" => Ok(hub.list_adapters(args["scan_bluetooth"].as_bool().unwrap_or(true)).await),
-        "connect" => hub.connect(args["target"].as_str().ok_or_else(|| anyhow!("missing 'target'"))?).await,
+        "list_adapters" => Ok(hub
+            .list_adapters(args["scan_bluetooth"].as_bool().unwrap_or(true))
+            .await),
+        "connect" => {
+            hub.connect(
+                args["target"]
+                    .as_str()
+                    .ok_or_else(|| anyhow!("missing 'target'"))?,
+            )
+            .await
+        }
         "disconnect" => {
             hub.disconnect().await?;
             Ok(json!({"disconnected": true}))
@@ -188,17 +228,50 @@ pub async fn call(hub: &Arc<Hub>, name: &str, args: Value, ctx: Ctx) -> Result<V
             }
             hub.clear_dtcs(id(&args, "session_id")?).await
         }
-        "set_sampling" => hub.set_sampling(Some(names(&args)), args["interval_ms"].as_u64(), args["auto_record"].as_bool()),
-        "set_ring_buffer" => hub.set_ring_buffer(args["seconds"].as_u64().ok_or_else(|| anyhow!("missing 'seconds'"))?),
-        "save_diagnostic_log" => hub.save_diagnostic_log(args["duration_s"].as_u64().unwrap_or(120), args["label"].as_str().unwrap_or(""), args["include_raw"].as_bool().unwrap_or(false)),
-        "start_recording" => hub.start_recording(args["label"].as_str().unwrap_or(""), Some(names(&args)), args["interval_ms"].as_u64()).await,
+        "set_sampling" => hub.set_sampling(
+            Some(names(&args)),
+            args["interval_ms"].as_u64(),
+            args["auto_record"].as_bool(),
+        ),
+        "set_ring_buffer" => hub.set_ring_buffer(
+            args["seconds"]
+                .as_u64()
+                .ok_or_else(|| anyhow!("missing 'seconds'"))?,
+        ),
+        "save_diagnostic_log" => hub.save_diagnostic_log(
+            args["duration_s"].as_u64().unwrap_or(120),
+            args["label"].as_str().unwrap_or(""),
+            args["include_raw"].as_bool().unwrap_or(false),
+        ),
+        "start_recording" => {
+            hub.start_recording(
+                args["label"].as_str().unwrap_or(""),
+                Some(names(&args)),
+                args["interval_ms"].as_u64(),
+            )
+            .await
+        }
         "stop_recording" => hub.stop_recording().await,
         "list_recordings" => hub.list_recordings(),
         "get_recording_summary" => hub.recording_summary(id(&args, "recording_id")?),
-        "query_recording" => hub.recording_query(id(&args, "recording_id")?, &names(&args), args["from_s"].as_f64().unwrap_or(0.0), args["to_s"].as_f64(), args["max_points"].as_u64().unwrap_or(200) as usize),
+        "query_recording" => hub.recording_query(
+            id(&args, "recording_id")?,
+            &names(&args),
+            args["from_s"].as_f64().unwrap_or(0.0),
+            args["to_s"].as_f64(),
+            args["max_points"].as_u64().unwrap_or(200) as usize,
+        ),
         "compare_recordings" => hub.recording_compare(id(&args, "a")?, id(&args, "b")?),
         "export_recording" => hub.recording_export(id(&args, "recording_id")?),
-        "list_sessions"|"get_session"|"query_session"|"get_session_events"|"list_vehicles"|"assign_session_vehicle"|"list_fault_annotations"|"save_fault_annotation"|"find_similar_conditions"=>hub.history(name,&args,origin==Origin::Mcp),
+        "list_sessions"
+        | "get_session"
+        | "query_session"
+        | "get_session_events"
+        | "list_vehicles"
+        | "assign_session_vehicle"
+        | "list_fault_annotations"
+        | "save_fault_annotation"
+        | "find_similar_conditions" => hub.history(name, &args, origin == Origin::Mcp),
         other => bail!("unknown tool '{other}'"),
     }
 }

@@ -56,11 +56,17 @@ pub fn list_ports() -> Result<Vec<AdapterInfo>> {
                 || n.contains("bluetooth")
                 || n.contains("rfcomm");
             let (note_key, note) = if bt {
-                ("bluetoothSerial", "Bluetooth (classic) serial port; choose the outgoing port")
+                (
+                    "bluetoothSerial",
+                    "Bluetooth (classic) serial port; choose the outgoing port",
+                )
             } else if matches!(p.port_type, SerialPortType::UsbPort(_)) {
                 ("usbSerial", "USB serial port")
             } else {
-                ("otherSerial", "Other serial port (may be a paired Bluetooth adapter)")
+                (
+                    "otherSerial",
+                    "Other serial port (may be a paired Bluetooth adapter)",
+                )
             };
             AdapterInfo {
                 kind: "serial".into(),

@@ -49,8 +49,23 @@ pub enum Backend {
 impl Backend {
     async fn call(&self, name: &str, args: Value, confirmed: bool) -> Result<Value> {
         match self {
-            Backend::Local(h) => tools::call(h, name, args, Ctx { origin: Origin::Mcp, confirmed, mcp_clear_enabled: tools::clear_enabled_for_mcp() }).await,
-            Backend::Remote(peer) => peer.request(json!({"op":"call","name":name,"args":args,"confirmed":confirmed})).await,
+            Backend::Local(h) => {
+                tools::call(
+                    h,
+                    name,
+                    args,
+                    Ctx {
+                        origin: Origin::Mcp,
+                        confirmed,
+                        mcp_clear_enabled: tools::clear_enabled_for_mcp(),
+                    },
+                )
+                .await
+            }
+            Backend::Remote(peer) => {
+                peer.request(json!({"op":"call","name":name,"args":args,"confirmed":confirmed}))
+                    .await
+            }
         }
     }
 
@@ -58,7 +73,9 @@ impl Backend {
         match self {
             Backend::Local(h) => h.note_client(name, version),
             Backend::Remote(peer) => {
-                let _ = peer.request(json!({"op":"hello","name":name,"version":version})).await;
+                let _ = peer
+                    .request(json!({"op":"hello","name":name,"version":version}))
+                    .await;
             }
         }
     }
@@ -84,7 +101,15 @@ fn err(id: Value, code: i64, message: &str) -> Value {
 
 impl Mcp {
     pub fn new(backend: Backend, out: mpsc::UnboundedSender<String>) -> Arc<Self> {
-        Arc::new(Self { backend, out, pending: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), client_elicits: AtomicBool::new(false), subscribed: Mutex::new(HashSet::new()), input_closed: AtomicBool::new(false) })
+        Arc::new(Self {
+            backend,
+            out,
+            pending: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(1),
+            client_elicits: AtomicBool::new(false),
+            subscribed: Mutex::new(HashSet::new()),
+            input_closed: AtomicBool::new(false),
+        })
     }
 
     fn send(&self, v: Value) {
@@ -95,16 +120,20 @@ impl Mcp {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         {
-            let mut pending=self.pending.lock().unwrap();
-            if self.input_closed.load(Ordering::SeqCst){return false;}
-            pending.insert(id,tx);
+            let mut pending = self.pending.lock().unwrap();
+            if self.input_closed.load(Ordering::SeqCst) {
+                return false;
+            }
+            pending.insert(id, tx);
         }
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": "elicitation/create", "params": {
             "message": message,
             "requestedSchema": {"type": "object", "properties": {"confirm": {"type": "boolean", "title": "Yes, clear the trouble codes", "default": false}}, "required": ["confirm"]}
         }}));
         match tokio::time::timeout(Duration::from_secs(120), rx).await {
-            Ok(Ok(v)) => v["result"]["action"] == "accept" && v["result"]["content"]["confirm"] == true,
+            Ok(Ok(v)) => {
+                v["result"]["action"] == "accept" && v["result"]["content"]["confirm"] == true
+            }
             _ => false,
         }
     }
@@ -126,16 +155,33 @@ impl Mcp {
 
     async fn tool_call(&self, params: &Value) -> Value {
         let name = params["name"].as_str().unwrap_or("");
-        let mut args = if params["arguments"].is_null() { json!({}) } else { params["arguments"].clone() };
+        let mut args = if params["arguments"].is_null() {
+            json!({})
+        } else {
+            params["arguments"].clone()
+        };
         let text = |t: String, is_err: bool| json!({"content": [{"type": "text", "text": t}], "isError": is_err});
         let mut confirmed = false;
-        if !tools::allowed_for_mcp(name) { return text("Tool disabled in this MCP profile".into(), true); }
-        if name == "clear_dtcs" && args["confirm"].as_bool() == Some(true) && tools::clear_enabled_for_mcp() {
+        if !tools::allowed_for_mcp(name) {
+            return text("Tool disabled in this MCP profile".into(), true);
+        }
+        if name == "clear_dtcs"
+            && args["confirm"].as_bool() == Some(true)
+            && tools::clear_enabled_for_mcp()
+        {
             if !self.client_elicits.load(Ordering::Relaxed) {
                 return text("This AI client cannot show a confirmation dialog, so codes are not cleared. Clear them from the OBD2 app instead.".into(), true);
             }
-            let Ok(status) = self.backend.call("connection_status", json!({}), false).await else { return text("Cannot verify vehicle session".into(), true); };
-            let Some(session) = status["session_id"].as_i64() else { return text("No active vehicle session".into(), true); };
+            let Ok(status) = self
+                .backend
+                .call("connection_status", json!({}), false)
+                .await
+            else {
+                return text("Cannot verify vehicle session".into(), true);
+            };
+            let Some(session) = status["session_id"].as_i64() else {
+                return text("No active vehicle session".into(), true);
+            };
             args["session_id"] = json!(session);
             confirmed = self.elicit_confirmation(&format!("Clear all trouble codes for vehicle session {session}? This erases freeze-frame data and resets emissions readiness monitors. A backup log is saved first.")).await;
         }
@@ -155,63 +201,92 @@ impl Mcp {
         Some(match method.as_str() {
             "initialize" => {
                 let want = params["protocolVersion"].as_str().unwrap_or("");
-                let version = if VERSIONS.contains(&want) { want } else { VERSIONS[0] };
-                self.client_elicits.store(params["capabilities"].get("elicitation").is_some(), Ordering::Relaxed);
+                let version = if VERSIONS.contains(&want) {
+                    want
+                } else {
+                    VERSIONS[0]
+                };
+                self.client_elicits.store(
+                    params["capabilities"].get("elicitation").is_some(),
+                    Ordering::Relaxed,
+                );
                 let ci = &params["clientInfo"];
-                self.backend.hello(ci["name"].as_str().unwrap_or("unknown client"), ci["version"].as_str().unwrap_or("")).await;
-                ok(id, json!({
-                    "protocolVersion": version,
-                    "capabilities": {"tools": {}, "prompts": {}, "resources": {"subscribe": true}},
-                    "serverInfo": {"name": "obdtrace", "version": APP_VERSION},
-                    "instructions": INSTRUCTIONS
-                }))
+                self.backend
+                    .hello(
+                        ci["name"].as_str().unwrap_or("unknown client"),
+                        ci["version"].as_str().unwrap_or(""),
+                    )
+                    .await;
+                ok(
+                    id,
+                    json!({
+                        "protocolVersion": version,
+                        "capabilities": {"tools": {}, "prompts": {}, "resources": {"subscribe": true}},
+                        "serverInfo": {"name": "obdtrace", "version": APP_VERSION},
+                        "instructions": INSTRUCTIONS
+                    }),
+                )
             }
             "ping" => ok(id, json!({})),
-            "tools/list" => ok(id, json!({"tools": tools::definitions().into_iter().filter(|v| tools::allowed_for_mcp(v["name"].as_str().unwrap_or(""))).collect::<Vec<_>>()})),
+            "tools/list" => ok(
+                id,
+                json!({"tools": tools::definitions().into_iter().filter(|v| tools::allowed_for_mcp(v["name"].as_str().unwrap_or(""))).collect::<Vec<_>>()}),
+            ),
             "tools/call" => ok(id, self.tool_call(params).await),
             "prompts/list" => ok(id, json!({"prompts": prompts::mcp_list()})),
-            "prompts/get" => match prompts::mcp_get(params["name"].as_str().unwrap_or(""), params["arguments"]["language"].as_str().unwrap_or("en"),&params["arguments"]) {
+            "prompts/get" => match prompts::mcp_get(
+                params["name"].as_str().unwrap_or(""),
+                params["arguments"]["language"].as_str().unwrap_or("en"),
+                &params["arguments"],
+            ) {
                 Some(p) => ok(id, p),
                 None => err(id, -32602, "unknown prompt"),
             },
-            "resources/list" => ok(id, json!({"resources": [
+            "resources/list" => ok(
+                id,
+                json!({"resources": [
                 {"uri": "obd://live", "name": "Live sensor snapshot", "mimeType": "application/json", "description": "Latest continuously sampled sensor values"},
                 {"uri": "obd://status", "name": "Connection status", "mimeType": "application/json"},
-                {"uri": HISTORY_GUIDE_URI, "name": "History and saving playbook", "mimeType": "text/markdown", "description": "Verify automatic capture, investigate an archived symptom, export evidence, and save a proposed assessment."}]})),
+                {"uri": HISTORY_GUIDE_URI, "name": "History and saving playbook", "mimeType": "text/markdown", "description": "Verify automatic capture, investigate an archived symptom, export evidence, and save a proposed assessment."}]}),
+            ),
             "resources/read" => {
                 let uri = params["uri"].as_str().unwrap_or("");
                 let name = match uri {
                     "obd://live" => "get_live_snapshot",
                     "obd://status" => "connection_status",
-                    HISTORY_GUIDE_URI => return Some(ok(id, json!({"contents": [
-                        {"uri": uri, "mimeType": "text/markdown", "text": HISTORY_GUIDE}
-                    ]}))),
+                    HISTORY_GUIDE_URI => {
+                        return Some(ok(
+                            id,
+                            json!({"contents": [
+                                {"uri": uri, "mimeType": "text/markdown", "text": HISTORY_GUIDE}
+                            ]}),
+                        ))
+                    }
                     _ => return Some(err(id, -32602, "unknown resource")),
                 };
                 let text = match self.backend.call(name, json!({}), false).await {
                     Ok(v) => v.to_string(),
                     Err(e) => json!({"error": e.to_string()}).to_string(),
                 };
-                ok(id, json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": text}]}))
+                ok(
+                    id,
+                    json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": text}]}),
+                )
             }
-            "resources/subscribe" => {
-                match params["uri"].as_str() {
-                    Some(uri @ ("obd://live" | "obd://status")) => {
-                        self.subscribed.lock().unwrap().insert(uri.to_string());
-                        ok(id, json!({}))
-                    }
-                    _ => err(id, -32602, "unknown resource"),
+            "resources/subscribe" => match params["uri"].as_str() {
+                Some(uri @ ("obd://live" | "obd://status")) => {
+                    self.subscribed.lock().unwrap().insert(uri.to_string());
+                    ok(id, json!({}))
                 }
-            }
-            "resources/unsubscribe" => {
-                match params["uri"].as_str() {
-                    Some(uri @ ("obd://live" | "obd://status")) => {
-                        self.subscribed.lock().unwrap().remove(uri);
-                        ok(id, json!({}))
-                    }
-                    _ => err(id, -32602, "unknown resource"),
+                _ => err(id, -32602, "unknown resource"),
+            },
+            "resources/unsubscribe" => match params["uri"].as_str() {
+                Some(uri @ ("obd://live" | "obd://status")) => {
+                    self.subscribed.lock().unwrap().remove(uri);
+                    ok(id, json!({}))
                 }
-            }
+                _ => err(id, -32602, "unknown resource"),
+            },
             _ => err(id, -32601, "method not found"),
         })
     }
@@ -220,25 +295,29 @@ impl Mcp {
 pub async fn run_stdio(backend: Backend) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let mcp = Mcp::new(backend, tx);
-    let writer=tokio::spawn(async move {
+    let writer = tokio::spawn(async move {
         let mut out = tokio::io::stdout();
         while let Some(line) = rx.recv().await {
-            if out.write_all(format!("{line}\n").as_bytes()).await.is_err() || out.flush().await.is_err() {
+            if out.write_all(format!("{line}\n").as_bytes()).await.is_err()
+                || out.flush().await.is_err()
+            {
                 break;
             }
         }
     });
     let ticker = mcp.clone();
-    let ticker_task=tokio::spawn(async move {
+    let ticker_task = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(2)).await;
             ticker.tick().await;
         }
     });
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
-    let mut tasks=tokio::task::JoinSet::new();
+    let mut tasks = tokio::task::JoinSet::new();
     while let Some(line) = lines.next_line().await? {
-        while let Some(result)=tasks.try_join_next(){result?;}
+        while let Some(result) = tasks.try_join_next() {
+            result?;
+        }
         if line.trim().is_empty() {
             continue;
         }
@@ -257,11 +336,13 @@ pub async fn run_stdio(backend: Backend) -> Result<()> {
             }
         });
     }
-    mcp.input_closed.store(true,Ordering::SeqCst);
+    mcp.input_closed.store(true, Ordering::SeqCst);
     mcp.pending.lock().unwrap().clear();
-    while let Some(result)=tasks.join_next().await {result?;}
+    while let Some(result) = tasks.join_next().await {
+        result?;
+    }
     ticker_task.abort();
-    let _=ticker_task.await;
+    let _ = ticker_task.await;
     drop(mcp);
     writer.await?;
     Ok(())
@@ -273,13 +354,30 @@ pub async fn selftest(hub: Arc<Hub>) -> Result<Vec<(String, bool)>> {
     let mcp = Mcp::new(Backend::Local(hub), tx);
     let mut results = Vec::new();
     let init = mcp.handle(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "obdtrace selftest", "version": "0"}}})).await;
-    results.push(("initialize".into(), init.is_some_and(|r| r["result"]["serverInfo"]["name"] == "obdtrace")));
-    let list = mcp.handle(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
-    results.push(("tools/list".into(), list.is_some_and(|r| r["result"]["tools"].as_array().is_some_and(|t| t.len() > 10))));
-    let ping = mcp.handle(json!({"jsonrpc": "2.0", "id": 3, "method": "ping"})).await;
+    results.push((
+        "initialize".into(),
+        init.is_some_and(|r| r["result"]["serverInfo"]["name"] == "obdtrace"),
+    ));
+    let list = mcp
+        .handle(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
+        .await;
+    results.push((
+        "tools/list".into(),
+        list.is_some_and(|r| {
+            r["result"]["tools"]
+                .as_array()
+                .is_some_and(|t| t.len() > 10)
+        }),
+    ));
+    let ping = mcp
+        .handle(json!({"jsonrpc": "2.0", "id": 3, "method": "ping"}))
+        .await;
     results.push(("ping".into(), ping.is_some()));
     let call = mcp.handle(json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "connection_status", "arguments": {}}})).await;
-    results.push(("tools/call connection_status".into(), call.is_some_and(|r| r["result"]["isError"] == false)));
+    results.push((
+        "tools/call connection_status".into(),
+        call.is_some_and(|r| r["result"]["isError"] == false),
+    ));
     Ok(results)
 }
 
@@ -289,7 +387,11 @@ mod tests {
     use crate::store::Db;
 
     fn hub() -> Arc<Hub> {
-        Hub::new(std::env::temp_dir().join(format!("obdtrace-test-{}", uuid::Uuid::new_v4())), Db::memory().unwrap()).unwrap()
+        Hub::new(
+            std::env::temp_dir().join(format!("obdtrace-test-{}", uuid::Uuid::new_v4())),
+            Db::memory().unwrap(),
+        )
+        .unwrap()
     }
 
     async fn rpc(m: &Arc<Mcp>, v: Value) -> Value {
@@ -304,15 +406,28 @@ mod tests {
         let init = rpc(&m, json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}})).await;
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
         let instructions = init["result"]["instructions"].as_str().unwrap();
-        assert!(instructions.contains("tools exposed by your client") && instructions.contains("Connect page"));
+        assert!(
+            instructions.contains("tools exposed by your client")
+                && instructions.contains("Connect page")
+        );
         let list = rpc(&m, json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await;
         let schema = |name| {
-            &list["result"]["tools"].as_array().unwrap().iter()
-                .find(|tool| tool["name"] == name).unwrap()["inputSchema"]
+            &list["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == name)
+                .unwrap()["inputSchema"]
         };
         assert_eq!(schema("list_vehicles")["properties"], json!({}));
         assert_eq!(schema("get_session")["required"], json!(["session_id"]));
-        assert_eq!(schema("get_session")["properties"].as_object().unwrap().len(), 1);
+        assert_eq!(
+            schema("get_session")["properties"]
+                .as_object()
+                .unwrap()
+                .len(),
+            1
+        );
         for (name, cursor, default) in [
             ("list_sessions", "before_id", 50),
             ("query_session", "after_rowid", 500),
@@ -320,49 +435,103 @@ mod tests {
         ] {
             let props = &schema(name)["properties"];
             assert_eq!(props[cursor]["type"], "integer");
-            assert_eq!(props["limit"], json!({"type":"integer","minimum":1,"maximum":1000,"default":default}));
-            assert_eq!(["before_id", "after_rowid", "after_id"].iter().filter(|key| props.get(**key).is_some()).count(), 1);
+            assert_eq!(
+                props["limit"],
+                json!({"type":"integer","minimum":1,"maximum":1000,"default":default})
+            );
+            assert_eq!(
+                ["before_id", "after_rowid", "after_id"]
+                    .iter()
+                    .filter(|key| props.get(**key).is_some())
+                    .count(),
+                1
+            );
         }
         let call = |name: &str, args: Value| json!({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":name,"arguments":args}});
         let r = rpc(&m, call("connection_status", json!({}))).await;
-        let status: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let status: Value =
+            serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(status["adapter"]["connected"], false);
         let hint = status["next_step"].as_str().unwrap();
         assert!(hint.contains("If your client exposes") && hint.contains("Connect page"));
         let r = rpc(&m, call("read_dtcs", json!({}))).await;
-        assert_eq!(r["result"]["isError"], true, "must fail cleanly when not connected");
+        assert_eq!(
+            r["result"]["isError"], true,
+            "must fail cleanly when not connected"
+        );
         let r = rpc(&m, call("connect", json!({"target":"mock"}))).await;
         assert_eq!(r["result"]["isError"], false, "{r}");
         let r = rpc(&m, call("read_dtcs", json!({}))).await;
-        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("P0420"));
+        assert!(r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("P0420"));
         let r = rpc(&m, call("read_vin", json!({}))).await;
         let t = r["result"]["content"][0]["text"].as_str().unwrap();
         assert!(t.contains("WAUZZZ8K") && !t.contains("9BA012345"));
         let r = rpc(&m, call("clear_dtcs", json!({"confirm": true}))).await;
-        assert_eq!(r["result"]["isError"], true, "clear must be refused over MCP by default");
+        assert_eq!(
+            r["result"]["isError"], true,
+            "clear must be refused over MCP by default"
+        );
         tokio::time::sleep(Duration::from_millis(1500)).await;
         let r = rpc(&m, call("get_live_snapshot", json!({}))).await;
-        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("rpm"));
+        assert!(r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("rpm"));
         let pids = ["o2_b1s1_voltage", "o2_b1s2_voltage"];
-        let r = rpc(&m, call("query_session", json!({"session_id":1,"pids":pids}))).await;
+        let r = rpc(
+            &m,
+            call("query_session", json!({"session_id":1,"pids":pids})),
+        )
+        .await;
         assert_eq!(r["result"]["isError"], false, "{r}");
-        let history: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let history: Value =
+            serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         let samples = crate::history::flat_samples(&history);
         for pid in pids {
-            assert!(samples.iter().filter(|s| s["name"] == pid && s["unit"] == "V" && s["source"] == "sampler").count() >= 2, "missing automatic voltage history for {pid}");
+            assert!(
+                samples
+                    .iter()
+                    .filter(|s| s["name"] == pid && s["unit"] == "V" && s["source"] == "sampler")
+                    .count()
+                    >= 2,
+                "missing automatic voltage history for {pid}"
+            );
         }
         let r = rpc(&m, call("start_recording", json!({"label":"t"}))).await;
         assert_eq!(r["result"]["isError"], false, "{r}");
         tokio::time::sleep(Duration::from_millis(2500)).await;
         let r = rpc(&m, call("stop_recording", json!({}))).await;
         assert_eq!(r["result"]["isError"], false);
-        let r = rpc(&m, call("get_recording_summary", json!({"recording_id": 1}))).await;
-        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("rpm"), "{r}");
-        let r = rpc(&m, call("save_diagnostic_log", json!({"duration_s": 60, "label": "unit test"}))).await;
+        let r = rpc(
+            &m,
+            call("get_recording_summary", json!({"recording_id": 1})),
+        )
+        .await;
+        assert!(
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("rpm"),
+            "{r}"
+        );
+        let r = rpc(
+            &m,
+            call(
+                "save_diagnostic_log",
+                json!({"duration_s": 60, "label": "unit test"}),
+            ),
+        )
+        .await;
         assert_eq!(r["result"]["isError"], false, "{r}");
         let r = rpc(&m, json!({"jsonrpc":"2.0","id":3,"method":"prompts/get","params":{"name":"check_engine_light"}})).await;
-        assert!(r["result"]["messages"][0]["content"]["text"].as_str().unwrap().contains("read_dtcs"));
-        let dir=std::path::PathBuf::from(h.status()["data_dir"].as_str().unwrap());
+        assert!(r["result"]["messages"][0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("read_dtcs"));
+        let dir = std::path::PathBuf::from(h.status()["data_dir"].as_str().unwrap());
         h.disconnect().await.unwrap();
         drop(m);
         drop(h);
@@ -380,13 +549,31 @@ mod tests {
         let query = |name, args| json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}});
         let decode = |r: Value| {
             assert_eq!(r["result"]["isError"], false, "{r}");
-            serde_json::from_str::<Value>(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+            serde_json::from_str::<Value>(r["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap()
         };
         let pids = crate::obd::PIDS;
         let supported = decode(rpc(&m, query("list_supported_sensors", json!({}))).await);
-        assert_eq!(supported["supported_sensor_names"].as_array().unwrap().len(), pids.len());
-        let events = decode(rpc(&m, query("get_session_events", json!({"session_id":session}))).await);
-        let demo = events["events"].as_array().unwrap().iter().find(|e| e["kind"] == "demo_seed").unwrap();
+        assert_eq!(
+            supported["supported_sensor_names"]
+                .as_array()
+                .unwrap()
+                .len(),
+            pids.len()
+        );
+        let events = decode(
+            rpc(
+                &m,
+                query("get_session_events", json!({"session_id":session})),
+            )
+            .await,
+        );
+        let demo = events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["kind"] == "demo_seed")
+            .unwrap();
         assert_eq!(demo["data"]["simulated"], true);
         let end = demo["data"]["to_ms"].as_i64().unwrap();
         let mut args = json!({"session_id":session,"from_ms":end-30_000,"to_ms":end,"limit":1000});
@@ -394,20 +581,39 @@ mod tests {
         loop {
             let result = decode(rpc(&m, query("query_session", args.clone())).await);
             samples.extend(crate::history::flat_samples(&result));
-            if result["next_after_rowid"].is_null() { break; }
+            if result["next_after_rowid"].is_null() {
+                break;
+            }
             args["after_rowid"] = result["next_after_rowid"].clone();
         }
         for pid in pids {
             let rows: Vec<_> = samples.iter().filter(|s| s["name"] == pid.name).collect();
             assert!(rows.len() >= 61, "{} has incomplete coverage", pid.name);
-            assert!(rows.iter().all(|s| s["source"] == "demo_seed" && s["unit"] == pid.unit));
+            assert!(rows
+                .iter()
+                .all(|s| s["source"] == "demo_seed" && s["unit"] == pid.unit));
         }
-        let peak = samples.iter().filter(|s| s["name"] == "throttle")
-            .max_by(|a, b| a["value"].as_f64().unwrap().total_cmp(&b["value"].as_f64().unwrap())).unwrap();
+        let peak = samples
+            .iter()
+            .filter(|s| s["name"] == "throttle")
+            .max_by(|a, b| {
+                a["value"]
+                    .as_f64()
+                    .unwrap()
+                    .total_cmp(&b["value"].as_f64().unwrap())
+            })
+            .unwrap();
         assert!(peak["value"].as_f64().unwrap() > 50.0);
-        assert!(samples.iter().any(|s| s["name"] == "throttle" && s["value"].as_f64().unwrap() < 20.0));
-        assert!(samples.iter().any(|s| s["name"] == "rpm" && s["t_ms"] == peak["t_ms"] && s["value"].as_f64().unwrap() > 3000.0));
-        assert!(samples.iter().filter(|s| s["name"] == "speed").all(|s| s["value"] == 0.0));
+        assert!(samples
+            .iter()
+            .any(|s| s["name"] == "throttle" && s["value"].as_f64().unwrap() < 20.0));
+        assert!(samples.iter().any(|s| s["name"] == "rpm"
+            && s["t_ms"] == peak["t_ms"]
+            && s["value"].as_f64().unwrap() > 3000.0));
+        assert!(samples
+            .iter()
+            .filter(|s| s["name"] == "speed")
+            .all(|s| s["value"] == 0.0));
         h.disconnect().await.unwrap();
         drop(m);
         drop(h);
@@ -417,17 +623,39 @@ mod tests {
     #[tokio::test]
     async fn history_guide_is_discoverable_without_a_running_app() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let m = Mcp::new(Backend::Remote(serde_json::from_value(json!({"port":0,"cert":[],"token":"","data":""})).unwrap()), tx);
-        let list = rpc(&m, json!({"jsonrpc":"2.0","id":1,"method":"resources/list"})).await;
-        let guide = list["result"]["resources"].as_array().unwrap().iter()
-            .find(|r| r["uri"] == "obd://history-guide").unwrap();
+        let m = Mcp::new(
+            Backend::Remote(
+                serde_json::from_value(json!({"port":0,"cert":[],"token":"","data":""})).unwrap(),
+            ),
+            tx,
+        );
+        let list = rpc(
+            &m,
+            json!({"jsonrpc":"2.0","id":1,"method":"resources/list"}),
+        )
+        .await;
+        let guide = list["result"]["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["uri"] == "obd://history-guide")
+            .unwrap();
         assert_eq!(guide["mimeType"], "text/markdown");
-        let read = rpc(&m, json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":guide["uri"]}})).await;
+        let read = rpc(
+            &m,
+            json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":guide["uri"]}}),
+        )
+        .await;
         let content = &read["result"]["contents"][0];
         assert_eq!(content["uri"], guide["uri"]);
         assert_eq!(content["mimeType"], guide["mimeType"]);
         let text = content["text"].as_str().unwrap();
-        for keyword in ["storage_error", "query_session", "export_recording", "save_fault_annotation"] {
+        for keyword in [
+            "storage_error",
+            "query_session",
+            "export_recording",
+            "save_fault_annotation",
+        ] {
             assert!(text.contains(keyword), "guide is missing {keyword}");
         }
     }
@@ -443,7 +671,11 @@ mod tests {
             (2, "resources/subscribe", "obd://live"),
             (3, "resources/unsubscribe", "obd://status"),
         ] {
-            let result = rpc(&m, json!({"jsonrpc":"2.0","id":id,"method":method,"params":{"uri":uri}})).await;
+            let result = rpc(
+                &m,
+                json!({"jsonrpc":"2.0","id":id,"method":method,"params":{"uri":uri}}),
+            )
+            .await;
             assert!(result.get("result").is_some(), "{result}");
         }
         let invalid = rpc(&m, json!({"jsonrpc":"2.0","id":4,"method":"resources/subscribe","params":{"uri":"obd://unknown"}})).await;

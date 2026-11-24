@@ -16,7 +16,10 @@ impl TcpTransport {
             .await
             .with_context(|| format!("timed out connecting to {addr}; is the computer on the adapter's WiFi network?"))?
             .with_context(|| format!("cannot connect to {addr}"))?;
-        Ok(Self { stream, addr: addr.to_string() })
+        Ok(Self {
+            stream,
+            addr: addr.to_string(),
+        })
     }
 }
 

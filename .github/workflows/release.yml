@@ -24,6 +24,15 @@ jobs:
             exit 1
           fi
 
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt
+      - run: cargo +1.89.0 fmt --check
+
   build:
     strategy:
       fail-fast: false
@@ -71,7 +80,7 @@ jobs:
 
   draft-release:
     if: github.event.repository.private && github.ref_type == 'tag' && github.repository == 'Avokid/obdtrace'
-    needs: build
+    needs: [no-private-data, fmt, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

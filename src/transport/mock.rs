@@ -12,7 +12,17 @@ use std::time::{Duration, Instant};
 pub const AUDI_DEMO: &str = "audi_demo";
 pub const DEMO_HISTORY_MS: i64 = 32_000;
 pub const SCENARIOS: &[&str] = &["catalyst", "healthy", "misfire", "lean", AUDI_DEMO];
-pub const QUIRKS: &[&str] = &["echo_stuck", "v15", "no_spaces", "slow_boot", "drop_first", "fake_support", "unable_first", "noisy_atz", "no_vin"];
+pub const QUIRKS: &[&str] = &[
+    "echo_stuck",
+    "v15",
+    "no_spaces",
+    "slow_boot",
+    "drop_first",
+    "fake_support",
+    "unable_first",
+    "noisy_atz",
+    "no_vin",
+];
 pub const MOCK_VIN: &str = "WAUZZZ8K9BA012345";
 
 pub struct MockTransport {
@@ -34,11 +44,17 @@ pub struct MockTransport {
 impl MockTransport {
     pub fn new(scenario: &str, quirks: &[String]) -> Result<Self> {
         if !SCENARIOS.contains(&scenario) {
-            bail!("unknown mock scenario '{scenario}' (available: {})", SCENARIOS.join(", "));
+            bail!(
+                "unknown mock scenario '{scenario}' (available: {})",
+                SCENARIOS.join(", ")
+            );
         }
         for q in quirks {
             if !QUIRKS.contains(&q.as_str()) {
-                bail!("unknown mock quirk '{q}' (available: {})", QUIRKS.join(", "));
+                bail!(
+                    "unknown mock quirk '{q}' (available: {})",
+                    QUIRKS.join(", ")
+                );
             }
         }
         let (dtcs, pending): (Vec<(u8, u8)>, Vec<(u8, u8)>) = match scenario {
@@ -76,15 +92,22 @@ impl MockTransport {
 
     pub fn demo_history(end_ms: i64) -> Result<Vec<Sample>> {
         let demo = Self::new(AUDI_DEMO, &[])?;
-        Ok((0..=DEMO_HISTORY_MS).step_by(500).flat_map(|offset| {
-            let demo = &demo;
-            PIDS.iter().map(move |pid| Sample {
-                t_ms: end_ms - DEMO_HISTORY_MS + offset,
-                name: pid.name.into(),
-                value: decode_pid(pid, &demo.encode(pid.pid, demo.value_at(pid.name, offset as f64 / 1000.0))).unwrap(),
-                unit: pid.unit.into(),
+        Ok((0..=DEMO_HISTORY_MS)
+            .step_by(500)
+            .flat_map(|offset| {
+                let demo = &demo;
+                PIDS.iter().map(move |pid| Sample {
+                    t_ms: end_ms - DEMO_HISTORY_MS + offset,
+                    name: pid.name.into(),
+                    value: decode_pid(
+                        pid,
+                        &demo.encode(pid.pid, demo.value_at(pid.name, offset as f64 / 1000.0)),
+                    )
+                    .unwrap(),
+                    unit: pid.unit.into(),
+                })
             })
-        }).collect())
+            .collect())
     }
 
     fn hex(&self, bytes: &[u8]) -> String {
@@ -99,9 +122,15 @@ impl MockTransport {
 
     fn supported(&self) -> Vec<u8> {
         if self.scenario == AUDI_DEMO {
-            return std::iter::once(0x01).chain(PIDS.iter().map(|p| p.pid)).collect();
+            return std::iter::once(0x01)
+                .chain(PIDS.iter().map(|p| p.pid))
+                .collect();
         }
-        let mut v: Vec<u8> = PIDS.iter().map(|p| p.pid).filter(|p| ![0x08, 0x09, 0x5C, 0x5E].contains(p)).collect();
+        let mut v: Vec<u8> = PIDS
+            .iter()
+            .map(|p| p.pid)
+            .filter(|p| ![0x08, 0x09, 0x5C, 0x5E].contains(p))
+            .collect();
         v.push(0x01);
         if self.q("fake_support") {
             v.push(0x5E);
@@ -125,7 +154,11 @@ impl MockTransport {
     }
 
     fn value(&self, name: &str) -> f64 {
-        let offset = if self.scenario == AUDI_DEMO { DEMO_HISTORY_MS as f64 / 1000.0 } else { 0.0 };
+        let offset = if self.scenario == AUDI_DEMO {
+            DEMO_HISTORY_MS as f64 / 1000.0
+        } else {
+            0.0
+        };
         self.value_at(name, self.t() + offset)
     }
 
@@ -133,18 +166,34 @@ impl MockTransport {
         let gas = if self.scenario == AUDI_DEMO {
             let phase = t % 24.0;
             let pulse = |start: f64, peak: f64, end: f64| {
-                ((phase - start) / (peak - start)).min((end - phase) / (end - peak)).clamp(0.0, 1.0)
+                ((phase - start) / (peak - start))
+                    .min((end - phase) / (end - peak))
+                    .clamp(0.0, 1.0)
             };
             0.65 * pulse(5.0, 7.0, 11.0) + pulse(15.0, 18.0, 22.0)
-        } else { 0.0 };
-        let rpm_jitter = if self.scenario == "misfire" { 120.0 * (t * 13.0).sin() } else { 0.0 };
+        } else {
+            0.0
+        };
+        let rpm_jitter = if self.scenario == "misfire" {
+            120.0 * (t * 13.0).sin()
+        } else {
+            0.0
+        };
         match name {
             "rpm" => 740.0 + 25.0 * (t * 0.7).sin() + rpm_jitter + 2500.0 * gas,
             "speed" => 0.0,
             "engine_load" => 22.0 + 2.0 * (t * 0.5).sin() + 46.0 * gas,
             "coolant_temp" => 88.0,
-            "short_fuel_trim_b1" => 1.5 * (t * 0.9).sin() + if self.scenario == "lean" { 9.0 } else { 0.0 },
-            "long_fuel_trim_b1" => if self.scenario == "lean" { 18.0 } else { 1.0 },
+            "short_fuel_trim_b1" => {
+                1.5 * (t * 0.9).sin() + if self.scenario == "lean" { 9.0 } else { 0.0 }
+            }
+            "long_fuel_trim_b1" => {
+                if self.scenario == "lean" {
+                    18.0
+                } else {
+                    1.0
+                }
+            }
             "short_fuel_trim_b2" => 1.8 * (t * 0.8).sin(),
             "long_fuel_trim_b2" => 2.3,
             "intake_manifold_pressure" => 33.0 + 51.0 * gas,
@@ -153,7 +202,13 @@ impl MockTransport {
             "maf" => 3.8 + 33.0 * gas,
             "throttle" => 14.0 + 49.0 * gas,
             "o2_b1s1_voltage" => 0.45 + 0.35 * (t * 2.0).sin() + 0.06 * gas,
-            "o2_b1s2_voltage" => if matches!(self.scenario.as_str(), "catalyst" | AUDI_DEMO) { 0.45 + 0.3 * (t * 2.0 - 0.4).sin() + 0.06 * gas } else { 0.65 },
+            "o2_b1s2_voltage" => {
+                if matches!(self.scenario.as_str(), "catalyst" | AUDI_DEMO) {
+                    0.45 + 0.3 * (t * 2.0 - 0.4).sin() + 0.06 * gas
+                } else {
+                    0.65
+                }
+            }
             "run_time" => 300.0 + t,
             "fuel_level" => 61.0,
             "distance_since_clear" => 12.0,
@@ -208,7 +263,10 @@ impl MockTransport {
     }
 
     fn obd(&mut self, req: &str) -> String {
-        let Ok(bytes) = (0..req.len() / 2).map(|i| u8::from_str_radix(&req[i * 2..i * 2 + 2], 16)).collect::<Result<Vec<u8>, _>>() else {
+        let Ok(bytes) = (0..req.len() / 2)
+            .map(|i| u8::from_str_radix(&req[i * 2..i * 2 + 2], 16))
+            .collect::<Result<Vec<u8>, _>>()
+        else {
             return "?".into();
         };
         if bytes.is_empty() || req.len() % 2 == 1 {
@@ -219,11 +277,24 @@ impl MockTransport {
         }
         let mode = bytes[0];
         match (mode, bytes.get(1).copied()) {
-            (0x01, Some(p)) if p % 0x20 == 0 && p <= 0x60 => self.hex(&[&[0x41, p][..], &self.bitmap(p)].concat()),
+            (0x01, Some(p)) if p % 0x20 == 0 && p <= 0x60 => {
+                self.hex(&[&[0x41, p][..], &self.bitmap(p)].concat())
+            }
             (0x01, Some(0x01)) => {
                 let n = self.dtcs.len() as u8;
-                let incomplete = if matches!(self.scenario.as_str(), "catalyst" | AUDI_DEMO) { 0x01 } else { 0x00 };
-                self.hex(&[0x41, 0x01, if self.mil { 0x80 | n } else { 0 }, 0x07, 0xE5, incomplete])
+                let incomplete = if matches!(self.scenario.as_str(), "catalyst" | AUDI_DEMO) {
+                    0x01
+                } else {
+                    0x00
+                };
+                self.hex(&[
+                    0x41,
+                    0x01,
+                    if self.mil { 0x80 | n } else { 0 },
+                    0x07,
+                    0xE5,
+                    incomplete,
+                ])
             }
             (0x01, Some(p)) => {
                 if p == 0x5E {
@@ -249,7 +320,9 @@ impl MockTransport {
                     0x0C => 2210.0,
                     0x0D => 98.0,
                     0x05 => 90.0,
-                    other => pid_by_code(other).map(|d| self.value(d.name)).unwrap_or(0.0),
+                    other => pid_by_code(other)
+                        .map(|d| self.value(d.name))
+                        .unwrap_or(0.0),
                 };
                 self.hex(&[&[0x42, p, 0x00][..], &self.encode(p, v)].concat())
             }
@@ -263,7 +336,13 @@ impl MockTransport {
                 self.hex(&[0x44])
             }
             (0x09, Some(0x00)) => self.hex(&[0x49, 0x00, 0x40, 0x00, 0x00, 0x00]),
-            (0x09, Some(0x02)) => if self.q("no_vin"){"NO DATA".into()}else{self.vin_reply()},
+            (0x09, Some(0x02)) => {
+                if self.q("no_vin") {
+                    "NO DATA".into()
+                } else {
+                    self.vin_reply()
+                }
+            }
             _ => "NO DATA".into(),
         }
     }
@@ -276,7 +355,9 @@ impl MockTransport {
         let c = cmd.trim().to_uppercase().replace(' ', "");
         let echo = self.echo || self.q("echo_stuck");
         let body: String = if let Some(at) = c.strip_prefix("AT") {
-            let v15_unsupported = ["AT", "ST", "CAF", "DPN", "CRA", "SH"].iter().any(|p| at.starts_with(p));
+            let v15_unsupported = ["AT", "ST", "CAF", "DPN", "CRA", "SH"]
+                .iter()
+                .any(|p| at.starts_with(p));
             if self.q("v15") && v15_unsupported {
                 "?".into()
             } else if at == "Z" {
@@ -285,7 +366,11 @@ impl MockTransport {
                 if self.q("slow_boot") {
                     self.ready_at = Instant::now() + Duration::from_millis(1500);
                 }
-                let noise = if self.q("noisy_atz") { "\u{1}\u{2}zz\r" } else { "" };
+                let noise = if self.q("noisy_atz") {
+                    "\u{1}\u{2}zz\r"
+                } else {
+                    ""
+                };
                 format!("{noise}\rELM327 v1.5")
             } else if at == "E0" {
                 self.echo = false;

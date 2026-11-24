@@ -27,10 +27,17 @@ pub fn integer(args: &Value, name: &str) -> Result<i64> {
 #[cfg(test)]
 pub fn flat_samples(page: &Value) -> Vec<Value> {
     let t0 = page["t0_ms"].as_i64().unwrap_or(0);
-    let mut out: Vec<Value> = page["series"].as_array().unwrap().iter().flat_map(|s| {
-        s["points"].as_array().unwrap().iter().map(move |p| json!({"name": s["pid"], "unit": s["unit"], "source": s["source"],
-            "t_ms": t0 + p[0].as_i64().unwrap(), "value": p[1]}))
-    }).collect();
+    let mut out: Vec<Value> = page["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| {
+            s["points"].as_array().unwrap().iter().map(move |p| {
+                json!({"name": s["pid"], "unit": s["unit"], "source": s["source"],
+            "t_ms": t0 + p[0].as_i64().unwrap(), "value": p[1]})
+            })
+        })
+        .collect();
     out.sort_by_key(|s| s["t_ms"].as_i64());
     out
 }
@@ -217,8 +224,14 @@ impl Db {
         vehicle: Option<i64>,
         demo: Option<&[Sample]>,
     ) -> Result<i64> {
-        let started_ms = demo.and_then(|rows| rows.first()).map_or_else(now_ms, |s| s.t_ms);
-        let label = if demo.is_some() { "Audi demo (simulated)" } else { "automatic" };
+        let started_ms = demo
+            .and_then(|rows| rows.first())
+            .map_or_else(now_ms, |s| s.t_ms);
+        let label = if demo.is_some() {
+            "Audi demo (simulated)"
+        } else {
+            "automatic"
+        };
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("INSERT INTO sessions(label,started_ms,adapter,protocol,vin_masked,notes,vehicle_id,state) VALUES(?,?,?,?,?, '',?,'active')",params![label,started_ms,adapter,protocol,masked,vehicle])?;
         let id = tx.last_insert_rowid();
@@ -264,7 +277,7 @@ impl Db {
     }
 
     pub fn session(&self, id: i64) -> Result<Value> {
-        let mut meta=self.session_bounds(id)?;
+        let mut meta = self.session_bounds(id)?;
         let mut q=self.conn.prepare("SELECT category,code,MIN(e.t_ms),MAX(e.t_ms) FROM dtc_codes d JOIN events e ON e.id=d.event_id WHERE d.session_id=? GROUP BY category,code ORDER BY category,code")?;
         let codes=q.query_map([id],|r|Ok(json!({"category":r.get::<_,String>(0)?,"code":r.get::<_,String>(1)?,"first_observed_ms":r.get::<_,i64>(2)?,"last_observed_ms":r.get::<_,i64>(3)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
         meta["dtc_history"] = json!(codes);
@@ -415,33 +428,71 @@ impl Db {
         let mut q = self.conn.prepare("SELECT rowid,t_ms,name,value,unit,source FROM samples WHERE session_id=?1 AND t_ms>=?2 AND t_ms<=?3
             AND rowid>?4 AND (json_array_length(?5)=0 OR name IN(SELECT value FROM json_each(?5))) ORDER BY rowid LIMIT ?6")?;
         let rows = q.query_map(
-            params![session, from, to, args["after_rowid"].as_i64().unwrap_or(0), pids.to_string(), n + 1],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, f64>(3)?, r.get::<_, String>(4)?, r.get::<_, String>(5)?)),
+            params![
+                session,
+                from,
+                to,
+                args["after_rowid"].as_i64().unwrap_or(0),
+                pids.to_string(),
+                n + 1
+            ],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, f64>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            },
         )?;
         let mut samples = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         let more = samples.len() > n as usize;
         samples.truncate(n as usize);
-        let next = if more { samples.last().map(|s| s.0) } else { None };
+        let next = if more {
+            samples.last().map(|s| s.0)
+        } else {
+            None
+        };
         let t0 = samples.iter().map(|s| s.1).min();
         // One series per (pid, unit, source) keeps pages lossless without repeating keys per sample.
-        let mut groups: std::collections::BTreeMap<(String, String, String), Vec<(i64, i64, f64)>> = Default::default();
+        let mut groups: std::collections::BTreeMap<(String, String, String), Vec<(i64, i64, f64)>> =
+            Default::default();
         for (rowid, t, name, value, unit, source) in samples.iter().cloned() {
-            groups.entry((name, unit, source)).or_default().push((t, rowid, value));
+            groups
+                .entry((name, unit, source))
+                .or_default()
+                .push((t, rowid, value));
         }
         let series: Vec<Value> = groups
             .into_iter()
             .map(|((pid, unit, source), mut pts)| {
                 pts.sort_by_key(|p| (p.0, p.1));
-                let points: Vec<Value> = pts.iter().map(|(t, _, v)| json!([t - t0.unwrap_or(0), v])).collect();
+                let points: Vec<Value> = pts
+                    .iter()
+                    .map(|(t, _, v)| json!([t - t0.unwrap_or(0), v]))
+                    .collect();
                 json!({"pid": pid, "unit": unit, "source": source, "points": points})
             })
             .collect();
-        Ok(json!({"session": meta, "t0_ms": t0, "rows": samples.len(), "series": series,
-            "downsampled": false, "next_after_rowid": next}))
+        Ok(
+            json!({"session": meta, "t0_ms": t0, "rows": samples.len(), "series": series,
+            "downsampled": false, "next_after_rowid": next}),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn query_buckets(&self, args: &Value, meta: Value, session: i64, from: i64, to: i64, pids: &Value, n: i64) -> Result<Value> {
+    fn query_buckets(
+        &self,
+        args: &Value,
+        meta: Value,
+        session: i64,
+        from: i64,
+        to: i64,
+        pids: &Value,
+        n: i64,
+    ) -> Result<Value> {
         let width = integer(args, "bucket_ms")?;
         if !(100..=3_600_000).contains(&width) {
             bail!("bucket_ms must be between 100 and 3600000");
@@ -457,10 +508,21 @@ impl Db {
              AND (json_array_length(?6)=0 OR name IN(SELECT value FROM json_each(?6)))
              GROUP BY b,name,unit ORDER BY b,name,unit LIMIT ?7",
         )?;
-        let rows = q.query_map(params![session, from, to, width, start, pids.to_string(), n + 1], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?,
-                r.get::<_, f64>(4)?, r.get::<_, f64>(5)?, r.get::<_, f64>(6)?, r.get::<_, String>(7)?))
-        })?;
+        let rows = q.query_map(
+            params![session, from, to, width, start, pids.to_string(), n + 1],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, f64>(4)?,
+                    r.get::<_, f64>(5)?,
+                    r.get::<_, f64>(6)?,
+                    r.get::<_, String>(7)?,
+                ))
+            },
+        )?;
         let mut buckets = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         let mut next = None;
         if buckets.len() > n as usize {
@@ -472,18 +534,29 @@ impl Db {
             }
             next = buckets.last().map(|b| b.0);
         }
-        let mut groups: std::collections::BTreeMap<(String, String), (std::collections::BTreeSet<String>, Vec<Value>)> = Default::default();
+        let mut groups: std::collections::BTreeMap<
+            (String, String),
+            (std::collections::BTreeSet<String>, Vec<Value>),
+        > = Default::default();
         for (b, name, unit, count, min, avg, max, sources) in &buckets {
             let g = groups.entry((name.clone(), unit.clone())).or_default();
             g.0.extend(sources.split(',').map(str::to_string));
-            g.1.push(json!([b * width, count, min, (avg * 1000.0).round() / 1000.0, max]));
+            g.1.push(json!([
+                b * width,
+                count,
+                min,
+                (avg * 1000.0).round() / 1000.0,
+                max
+            ]));
         }
         let series: Vec<Value> = groups
             .into_iter()
             .map(|((pid, unit), (sources, points))| json!({"pid": pid, "unit": unit, "sources": sources, "points": points}))
             .collect();
-        Ok(json!({"session": meta, "t0_ms": from, "bucket_ms": width, "point_fields": ["dt_ms", "n", "min", "avg", "max"],
-            "rows": buckets.len(), "series": series, "downsampled": true, "next_after_bucket": next}))
+        Ok(
+            json!({"session": meta, "t0_ms": from, "bucket_ms": width, "point_fields": ["dt_ms", "n", "min", "avg", "max"],
+            "rows": buckets.len(), "series": series, "downsampled": true, "next_after_bucket": next}),
+        )
     }
 
     pub fn start_investigation(&self, session: i64, label: &str) -> Result<i64> {
@@ -874,18 +947,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            flat_samples(&next)[0]["value"], 2000.0,
+            flat_samples(&next)[0]["value"],
+            2000.0,
             "no striding past a transient"
         );
         let mut args = json!({"session_id":sid,"from_ms":1000,"bucket_ms":1000,"limit":2});
         let first = db.query_samples(&args).unwrap();
         assert_eq!(first["downsampled"], true);
-        assert_eq!(first["series"][0]["points"], json!([[0, 3, 750.0, 1170.0, 2000.0], [1000, 2, 750.0, 750.0, 750.0]]), "transient max survives aggregation");
+        assert_eq!(
+            first["series"][0]["points"],
+            json!([
+                [0, 3, 750.0, 1170.0, 2000.0],
+                [1000, 2, 750.0, 750.0, 750.0]
+            ]),
+            "transient max survives aggregation"
+        );
         args["after_bucket"] = first["next_after_bucket"].clone();
         let rest = db.query_samples(&args).unwrap();
-        assert_eq!(rest["series"][0]["points"], json!([[2000, 2, 750.0, 750.0, 750.0], [4000, 2, 750.0, 750.0, 750.0]]));
+        assert_eq!(
+            rest["series"][0]["points"],
+            json!([
+                [2000, 2, 750.0, 750.0, 750.0],
+                [4000, 2, 750.0, 750.0, 750.0]
+            ])
+        );
         assert!(rest["next_after_bucket"].is_null());
-        assert!(db.query_samples(&json!({"session_id":sid,"bucket_ms":1000,"after_rowid":1})).is_err());
+        assert!(db
+            .query_samples(&json!({"session_id":sid,"bucket_ms":1000,"after_rowid":1}))
+            .is_err());
         let args = json!({"vehicle_id":1,"conditions":[{"pid":"rpm","min":700,"max":800}],"bucket_ms":1000,"min_duration_ms":1000,"limit":1});
         let found = db.conditions(&args).unwrap();
         assert_eq!(
